@@ -217,10 +217,22 @@ AgentRules.cmd
 預設備份位於：
 
 ```text
-backups/<yyyyMMdd-HHmmss>/<target>/
+backups/<yyyyMMdd-HHmmss-fff>/<target>/
 ```
 
-只備份實際即將被覆蓋的受管理檔案；新增檔案不需要備份。第一階段不會自動清理舊備份。
+只備份實際即將被覆蓋的受管理檔案；新增檔案不需要備份。
+
+備份清理沿用 `AgentRules.cmd` 入口，預設保留最新 5 份，且只清理超過 30 天的其餘時間戳備份：
+
+```powershell
+# 只預覽，不刪除
+.\AgentRules.cmd cleanup
+
+# 依保留政策實際清理
+.\AgentRules.cmd cleanup --apply
+```
+
+清理器只處理 `backups/<yyyyMMdd-HHmmss-fff>/`。名稱不符合格式的目錄（例如手動建立的 legacy 封存）會略過，不會自動刪除。
 
 回復時，先預覽備份內容，再把需要的檔案複製回對應目的地。例如：
 

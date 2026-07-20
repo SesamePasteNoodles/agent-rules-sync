@@ -173,6 +173,44 @@ Write-TestResult `
     -Success (($interactiveResult.ExitCode -eq 0) -and ($interactiveResult.StandardOutput -match '\[SUMMARY\]')) `
     -Detail "Exit code $($interactiveResult.ExitCode); stderr: $($interactiveResult.StandardError)"
 
+$backupRoot = Join-Path $sandboxRepository 'backups'
+$oldBackupNames = @(
+    40..45 | ForEach-Object { (Get-Date).AddDays(-$_).ToString('yyyyMMdd-HHmmss-fff') }
+)
+foreach ($backupName in $oldBackupNames) {
+    $backupFile = Join-Path (Join-Path $backupRoot $backupName) 'codex\AGENTS.md'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $backupFile)) | Out-Null
+    [System.IO.File]::WriteAllText($backupFile, $backupName, $utf8NoBom)
+}
+$legacyBackup = Join-Path $backupRoot 'legacy-rules-20260720'
+[System.IO.Directory]::CreateDirectory($legacyBackup) | Out-Null
+
+& $entryPoint cleanup | Out-Host
+$exitCode = $LASTEXITCODE
+$backupCountAfterPreview = @(
+    Get-ChildItem -LiteralPath $backupRoot -Directory |
+        Where-Object { $_.Name -match '^\d{8}-\d{6}-\d{3}$' }
+).Count
+Write-TestResult `
+    -Name 'Backup cleanup preview does not delete files' `
+    -Success (($exitCode -eq 0) -and ($backupCountAfterPreview -eq 6)) `
+    -Detail "Exit code $exitCode; timestamp backups: $backupCountAfterPreview"
+
+& $entryPoint cleanup --apply | Out-Host
+$exitCode = $LASTEXITCODE
+$backupCountAfterCleanup = @(
+    Get-ChildItem -LiteralPath $backupRoot -Directory |
+        Where-Object { $_.Name -match '^\d{8}-\d{6}-\d{3}$' }
+).Count
+Write-TestResult `
+    -Name 'Backup cleanup keeps latest five and preserves legacy directory' `
+    -Success (
+        ($exitCode -eq 0) -and
+        ($backupCountAfterCleanup -eq 5) -and
+        (Test-Path -LiteralPath $legacyBackup -PathType Container)
+    ) `
+    -Detail "Exit code $exitCode; timestamp backups: $backupCountAfterCleanup"
+
 $exitCode = Invoke-TestScript -ScriptName 'Build-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Write-TestResult -Name 'Build all targets' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"
 

@@ -37,9 +37,11 @@ function Write-AgentRulesUsage {
     Write-Host '  AgentRules.cmd antigravity'
     Write-Host '  AgentRules.cmd build'
     Write-Host '  AgentRules.cmd test'
+    Write-Host '  AgentRules.cmd cleanup'
+    Write-Host '  AgentRules.cmd cleanup --apply'
     Write-Host '  AgentRules.cmd help'
     Write-Host
-    Write-Host '注意：sync、codex 與 antigravity 會立即套用變更。' -ForegroundColor Yellow
+    Write-Host '注意：sync、codex、antigravity 與 cleanup --apply 會立即套用變更。' -ForegroundColor Yellow
 }
 
 function Invoke-AgentRulesChildScript {
@@ -65,8 +67,10 @@ function Invoke-AgentRulesChildScript {
 function Invoke-AgentRulesCommand {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('check', 'preview', 'sync', 'codex', 'antigravity', 'build', 'test')]
-        [string]$Name
+        [ValidateSet('check', 'preview', 'sync', 'codex', 'antigravity', 'build', 'test', 'cleanup')]
+        [string]$Name,
+
+        [string[]]$Arguments = @()
     )
 
     switch ($Name) {
@@ -90,6 +94,11 @@ function Invoke-AgentRulesCommand {
         }
         'test' {
             Invoke-AgentRulesChildScript -RelativePath 'tests\Test-AgentRules.ps1'
+        }
+        'cleanup' {
+            Invoke-AgentRulesChildScript `
+                -RelativePath 'scripts\Cleanup-AgentRulesBackups.ps1' `
+                -Arguments $Arguments
         }
     }
 }
@@ -129,6 +138,8 @@ function Show-AgentRulesMenu {
         Write-Host '4. 僅同步 Codex'
         Write-Host '5. 僅同步 Antigravity'
         Write-Host '6. 執行測試'
+        Write-Host '7. 預覽備份清理'
+        Write-Host '8. 清理過期備份'
         Write-Host '0. 離開'
         Write-Host
 
@@ -138,6 +149,7 @@ function Show-AgentRulesMenu {
         }
         $selection = $selection.Trim()
         $commandName = $null
+        $commandArguments = @()
         switch ($selection) {
             '1' { $commandName = 'check' }
             '2' { $commandName = 'preview' }
@@ -157,16 +169,26 @@ function Show-AgentRulesMenu {
                 }
             }
             '6' { $commandName = 'test' }
+            '7' { $commandName = 'cleanup' }
+            '8' {
+                Write-Host
+                Write-Host '即將刪除符合保留政策的過期備份。' -ForegroundColor Yellow
+                $confirmation = Read-Host '是否繼續？[y/N]'
+                if (($null -ne $confirmation) -and ($confirmation.Trim() -ieq 'y')) {
+                    $commandName = 'cleanup'
+                    $commandArguments = @('--apply')
+                }
+            }
             '0' { return }
             default {
                 Write-Host
-                Write-Host '[ERROR] 無效的選項，請輸入 0 到 6。' -ForegroundColor Red
+                Write-Host '[ERROR] 無效的選項，請輸入 0 到 8。' -ForegroundColor Red
                 $null = Read-Host '按 Enter 返回選單'
             }
         }
 
         if ($null -ne $commandName) {
-            Invoke-AgentRulesCommand -Name $commandName
+            Invoke-AgentRulesCommand -Name $commandName -Arguments $commandArguments
             Show-AgentRulesCommandResult -ExitCode $script:LastCommandExitCode
         }
     }
@@ -181,7 +203,7 @@ $unexpectedArguments = @(
     $ExtraArguments |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 )
-if ($unexpectedArguments.Count -gt 0) {
+if ($unexpectedArguments.Count -gt 0 -and $Command -ine 'cleanup') {
     Write-Host "[ERROR] 不支援額外參數：$($unexpectedArguments -join ' ')" -ForegroundColor Red
     Write-Host
     Write-AgentRulesUsage
@@ -199,12 +221,12 @@ if ($normalizedCommand -in @('help', '--help', '-h')) {
     exit 0
 }
 
-if ($normalizedCommand -notin @('check', 'preview', 'sync', 'codex', 'antigravity', 'build', 'test')) {
+if ($normalizedCommand -notin @('check', 'preview', 'sync', 'codex', 'antigravity', 'build', 'test', 'cleanup')) {
     Write-Host "[ERROR] 未知命令：$Command" -ForegroundColor Red
     Write-Host
     Write-AgentRulesUsage
     exit 2
 }
 
-Invoke-AgentRulesCommand -Name $normalizedCommand
+Invoke-AgentRulesCommand -Name $normalizedCommand -Arguments $ExtraArguments
 exit $script:LastCommandExitCode
