@@ -21,7 +21,7 @@ jobs:
 
       - name: Run isolated test suite
         shell: powershell
-        run: ./tests/Test-AgentRules.ps1
+        run: ./tests/Test-AgentRules.ps1 -SkipInteractive
 
       - name: Rebuild tracked artifacts
         shell: powershell

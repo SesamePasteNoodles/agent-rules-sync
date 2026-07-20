@@ -1,5 +1,7 @@
 ﻿[CmdletBinding()]
-param()
+param(
+    [switch]$SkipInteractive
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -29,6 +31,12 @@ function Write-TestResult {
         $script:Failed++
         Write-Host "[FAIL] $Name - $Detail"
     }
+}
+
+function Write-TestSkip {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    Write-Host "[SKIP] $Name"
 }
 
 function Invoke-TestScript {
@@ -259,36 +267,42 @@ Write-TestResult `
     -Success (($exitCode -eq 0) -and (Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)) `
     -Detail "Exit code $exitCode; output exists: $(Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)"
 
-Remove-Item -LiteralPath $testSettingsPath -Force
-$firstLaunchResult = Invoke-InteractiveMenuCheck `
-    -EntryPoint $entryPoint `
-    -InputLines @('2', $detectedCodex, $detectedAntigravity, 'y', '0')
-$firstLaunchSettings = Read-AgentRulesUserSettings
-Write-TestResult `
-    -Name 'First launch accepts manual global directories' `
-    -Success (
-        ($firstLaunchResult.ExitCode -eq 0) -and
-        ($null -ne $firstLaunchSettings) -and
-        ($firstLaunchSettings.Destinations.Codex -eq $detectedCodex) -and
-        ($firstLaunchSettings.Destinations.Antigravity -eq $detectedAntigravity)
-    ) `
-    -Detail "Exit code $($firstLaunchResult.ExitCode); stderr: $($firstLaunchResult.StandardError)"
-
-$interactiveResult = Invoke-InteractiveMenuCheck -EntryPoint $entryPoint
 $menuSource = [System.IO.File]::ReadAllText(
     (Join-Path $sandboxRepository 'scripts\AgentRules.Menu.ps1'),
     [System.Text.Encoding]::UTF8
 )
-Write-TestResult `
-    -Name 'Interactive menu preserves child log output and shows directory actions' `
-    -Success (
-        ($interactiveResult.ExitCode -eq 0) -and
-        ($interactiveResult.StandardOutput -match '\[SUMMARY\]') -and
-        ($menuSource -match "Write-Host '9\. 修改 Agent 目錄'") -and
-        ($menuSource -match "Write-Host '10\. 重新偵測 Agent 目錄'") -and
-        ($menuSource -match "Write-Host '11\. 回復備份檔案'")
-    ) `
-    -Detail "Exit code $($interactiveResult.ExitCode); stderr: $($interactiveResult.StandardError)"
+if ($SkipInteractive) {
+    Write-TestSkip -Name 'First launch accepts manual global directories'
+    Write-TestSkip -Name 'Interactive menu preserves child log output and shows directory actions'
+}
+else {
+    Remove-Item -LiteralPath $testSettingsPath -Force
+    $firstLaunchResult = Invoke-InteractiveMenuCheck `
+        -EntryPoint $entryPoint `
+        -InputLines @('2', $detectedCodex, $detectedAntigravity, 'y', '0')
+    $firstLaunchSettings = Read-AgentRulesUserSettings
+    Write-TestResult `
+        -Name 'First launch accepts manual global directories' `
+        -Success (
+            ($firstLaunchResult.ExitCode -eq 0) -and
+            ($null -ne $firstLaunchSettings) -and
+            ($firstLaunchSettings.Destinations.Codex -eq $detectedCodex) -and
+            ($firstLaunchSettings.Destinations.Antigravity -eq $detectedAntigravity)
+        ) `
+        -Detail "Exit code $($firstLaunchResult.ExitCode); stderr: $($firstLaunchResult.StandardError)"
+
+    $interactiveResult = Invoke-InteractiveMenuCheck -EntryPoint $entryPoint
+    Write-TestResult `
+        -Name 'Interactive menu preserves child log output and shows directory actions' `
+        -Success (
+            ($interactiveResult.ExitCode -eq 0) -and
+            ($interactiveResult.StandardOutput -match '\[SUMMARY\]') -and
+            ($menuSource -match "Write-Host '9\. 修改 Agent 目錄'") -and
+            ($menuSource -match "Write-Host '10\. 重新偵測 Agent 目錄'") -and
+            ($menuSource -match "Write-Host '11\. 回復備份檔案'")
+        ) `
+        -Detail "Exit code $($interactiveResult.ExitCode); stderr: $($interactiveResult.StandardError)"
+}
 
 & $entryPoint restore | Out-Host
 $exitCode = $LASTEXITCODE
@@ -384,20 +398,25 @@ $restoreBytes = @(
 ) + [System.Text.Encoding]::UTF8.GetBytes("historical restore`r`nbyte preserving")
 [System.IO.File]::WriteAllBytes($restoreBackupFile, $restoreBytes)
 
-$restoreMenuResult = Invoke-InteractiveMenuCheck `
-    -EntryPoint $entryPoint `
-    -InputLines @('11', '1', 'Codex', 'n', '', '0')
-Write-TestResult `
-    -Name 'Interactive restore menu selects a backup by number' `
-    -Success (
-        ($restoreMenuResult.ExitCode -eq 0) -and
-        ($restoreMenuResult.StandardOutput -match "1\. $restoreBackupId") -and
-        ([regex]::Matches(
-            $restoreMenuResult.StandardOutput,
-            [regex]::Escape($restoreBackupId)
-        ).Count -ge 2)
-    ) `
-    -Detail "Exit code $($restoreMenuResult.ExitCode); stderr: $($restoreMenuResult.StandardError)"
+if ($SkipInteractive) {
+    Write-TestSkip -Name 'Interactive restore menu selects a backup by number'
+}
+else {
+    $restoreMenuResult = Invoke-InteractiveMenuCheck `
+        -EntryPoint $entryPoint `
+        -InputLines @('11', '1', 'Codex', 'n', '', '0')
+    Write-TestResult `
+        -Name 'Interactive restore menu selects a backup by number' `
+        -Success (
+            ($restoreMenuResult.ExitCode -eq 0) -and
+            ($restoreMenuResult.StandardOutput -match "1\. $restoreBackupId") -and
+            ([regex]::Matches(
+                $restoreMenuResult.StandardOutput,
+                [regex]::Escape($restoreBackupId)
+            ).Count -ge 2)
+        ) `
+        -Detail "Exit code $($restoreMenuResult.ExitCode); stderr: $($restoreMenuResult.StandardError)"
+}
 
 $codexAgents = Join-Path (Join-Path $destinationRoot 'codex') 'AGENTS.md'
 $destinationHashBeforeRestore = (Get-FileHash -LiteralPath $codexAgents -Algorithm SHA256).Hash

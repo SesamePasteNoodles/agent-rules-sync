@@ -284,7 +284,15 @@ function Get-TextSha256 {
 function Get-FileSha256 {
     param([Parameter(Mandatory = $true)][string]$LiteralPath)
 
-    return (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash
+    $stream = [System.IO.File]::OpenRead($LiteralPath)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+    }
+    finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
 }
 
 function Test-SafeRelativePath {
