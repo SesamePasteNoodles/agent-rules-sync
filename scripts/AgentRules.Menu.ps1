@@ -15,6 +15,7 @@ $ErrorActionPreference = 'Stop'
 
 $script:RepositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $script:LastCommandExitCode = 0
+. (Join-Path $PSScriptRoot 'AgentRules.Common.ps1')
 
 function Write-AgentRulesMenuHeader {
     Clear-Host
@@ -129,7 +130,208 @@ function Show-AgentRulesCommandResult {
     $null = Read-Host '按 Enter 返回選單'
 }
 
+function Read-AgentRulesDestination {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Codex', 'Antigravity')]
+        [string]$TargetName,
+
+        [string]$CurrentPath
+    )
+
+    while ($true) {
+        $prompt = if ([string]::IsNullOrWhiteSpace($CurrentPath)) {
+            "$TargetName 全域目錄"
+        }
+        else {
+            "$TargetName 全域目錄（直接按 Enter 保留 $CurrentPath）"
+        }
+        $inputPath = Read-Host $prompt
+        if ([string]::IsNullOrWhiteSpace($inputPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($CurrentPath)) {
+                return $CurrentPath
+            }
+            Write-Host '[ERROR] 目錄不可為空。' -ForegroundColor Red
+            continue
+        }
+
+        try {
+            $resolvedPath = ConvertTo-AgentRulesDestinationPath -Path $inputPath
+            if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container -ErrorAction Stop)) {
+                Write-Host "目錄尚不存在：$resolvedPath" -ForegroundColor Yellow
+                $confirmation = Read-Host '是否採用，並在同步時建立？[y/N]'
+                if (($null -eq $confirmation) -or ($confirmation.Trim() -ine 'y')) {
+                    continue
+                }
+            }
+            return $resolvedPath
+        }
+        catch {
+            Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+}
+
+function Confirm-AgentRulesDestinations {
+    param(
+        [Parameter(Mandatory = $true)][string]$CodexDestination,
+        [Parameter(Mandatory = $true)][string]$AntigravityDestination
+    )
+
+    Write-Host
+    Write-Host '準備儲存以下全域目錄：' -ForegroundColor Cyan
+    Write-Host "  Codex：       $CodexDestination"
+    Write-Host "  Antigravity： $AntigravityDestination"
+    Write-Host
+    $confirmation = Read-Host '是否儲存？[y/N]'
+    return ($null -ne $confirmation) -and ($confirmation.Trim() -ieq 'y')
+}
+
+function Save-AgentRulesDestinationsInteractive {
+    param(
+        [Parameter(Mandatory = $true)][string]$CodexDestination,
+        [Parameter(Mandatory = $true)][string]$AntigravityDestination
+    )
+
+    if (-not (Confirm-AgentRulesDestinations `
+        -CodexDestination $CodexDestination `
+        -AntigravityDestination $AntigravityDestination)) {
+        Write-Host '已取消，未變更設定。' -ForegroundColor DarkYellow
+        return $false
+    }
+
+    try {
+        $settings = Save-AgentRulesUserSettings `
+            -CodexDestination $CodexDestination `
+            -AntigravityDestination $AntigravityDestination
+        Write-Host "已儲存設定：$($settings.SettingsPath)" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "[ERROR] 無法儲存設定：$($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Invoke-AgentRulesManualDirectorySetup {
+    param($CurrentSettings)
+
+    $currentCodex = if ($null -eq $CurrentSettings) {
+        $null
+    }
+    else {
+        [string]$CurrentSettings.Destinations.Codex
+    }
+    $currentAntigravity = if ($null -eq $CurrentSettings) {
+        $null
+    }
+    else {
+        [string]$CurrentSettings.Destinations.Antigravity
+    }
+
+    Write-Host
+    $codexDestination = Read-AgentRulesDestination `
+        -TargetName 'Codex' `
+        -CurrentPath $currentCodex
+    $antigravityDestination = Read-AgentRulesDestination `
+        -TargetName 'Antigravity' `
+        -CurrentPath $currentAntigravity
+    return Save-AgentRulesDestinationsInteractive `
+        -CodexDestination $codexDestination `
+        -AntigravityDestination $antigravityDestination
+}
+
+function Invoke-AgentRulesDirectoryDetection {
+    Write-Host
+    Write-Host '正在偵測 Agent 全域目錄（每個 Agent 最多嘗試 3 個位置）……' -ForegroundColor Cyan
+    $codexResult = Find-AgentRulesGlobalDirectory -TargetName 'Codex' -MaximumAttempts 3
+    $antigravityResult = Find-AgentRulesGlobalDirectory -TargetName 'Antigravity' -MaximumAttempts 3
+
+    $codexDescription = if ($codexResult.Success) { $codexResult.Path } else { '未找到' }
+    $antigravityDescription = if ($antigravityResult.Success) { $antigravityResult.Path } else { '未找到' }
+    $codexColor = if ($codexResult.Success) { 'Green' } else { 'Yellow' }
+    $antigravityColor = if ($antigravityResult.Success) { 'Green' } else { 'Yellow' }
+    Write-Host ("Codex：       {0}（嘗試 {1} 次）" -f $codexDescription, $codexResult.AttemptCount) `
+        -ForegroundColor $codexColor
+    Write-Host ("Antigravity： {0}（嘗試 {1} 次）" -f $antigravityDescription, $antigravityResult.AttemptCount) `
+        -ForegroundColor $antigravityColor
+
+    $codexDestination = if ($codexResult.Success) {
+        $codexResult.Path
+    }
+    else {
+        Write-Host
+        Write-Host 'Codex 偵測失敗，請手動輸入。' -ForegroundColor Yellow
+        Read-AgentRulesDestination -TargetName 'Codex'
+    }
+    $antigravityDestination = if ($antigravityResult.Success) {
+        $antigravityResult.Path
+    }
+    else {
+        Write-Host
+        Write-Host 'Antigravity 偵測失敗，請手動輸入。' -ForegroundColor Yellow
+        Read-AgentRulesDestination -TargetName 'Antigravity'
+    }
+
+    return Save-AgentRulesDestinationsInteractive `
+        -CodexDestination $codexDestination `
+        -AntigravityDestination $antigravityDestination
+}
+
+function Get-AgentRulesSettingsForMenu {
+    try {
+        return (Read-AgentRulesUserSettings)
+    }
+    catch {
+        Write-Host "[WARN] $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host '請重新設定 Agent 全域目錄。' -ForegroundColor Yellow
+        return $null
+    }
+}
+
+function Initialize-AgentRulesDirectories {
+    if ($null -ne (Get-AgentRulesSettingsForMenu)) {
+        return $true
+    }
+
+    while ($true) {
+        Write-AgentRulesMenuHeader
+        Write-Host '尚未設定 Agent 全域目錄。' -ForegroundColor Yellow
+        Write-Host
+        Write-Host '1. 自動偵測'
+        Write-Host '2. 手動輸入'
+        Write-Host '0. 離開'
+        Write-Host
+
+        $selection = Read-Host '請選擇'
+        if ($null -eq $selection) {
+            return $false
+        }
+        switch ($selection.Trim()) {
+            '1' {
+                if (Invoke-AgentRulesDirectoryDetection) {
+                    return $true
+                }
+            }
+            '2' {
+                if (Invoke-AgentRulesManualDirectorySetup -CurrentSettings $null) {
+                    return $true
+                }
+            }
+            '0' { return $false }
+            default {
+                Write-Host '[ERROR] 無效的選項，請輸入 0、1 或 2。' -ForegroundColor Red
+                $null = Read-Host '按 Enter 繼續'
+            }
+        }
+    }
+}
+
 function Show-AgentRulesMenu {
+    if (-not (Initialize-AgentRulesDirectories)) {
+        return
+    }
+
     while ($true) {
         Write-AgentRulesMenuHeader
         Write-Host '1. 檢查狀態'
@@ -140,6 +342,8 @@ function Show-AgentRulesMenu {
         Write-Host '6. 執行測試'
         Write-Host '7. 預覽備份清理'
         Write-Host '8. 清理過期備份'
+        Write-Host '9. 修改 Agent 目錄'
+        Write-Host '10. 重新偵測 Agent 目錄'
         Write-Host '0. 離開'
         Write-Host
 
@@ -179,10 +383,19 @@ function Show-AgentRulesMenu {
                     $commandArguments = @('--apply')
                 }
             }
+            '9' {
+                $null = Invoke-AgentRulesManualDirectorySetup `
+                    -CurrentSettings (Get-AgentRulesSettingsForMenu)
+                $null = Read-Host '按 Enter 返回選單'
+            }
+            '10' {
+                $null = Invoke-AgentRulesDirectoryDetection
+                $null = Read-Host '按 Enter 返回選單'
+            }
             '0' { return }
             default {
                 Write-Host
-                Write-Host '[ERROR] 無效的選項，請輸入 0 到 8。' -ForegroundColor Red
+                Write-Host '[ERROR] 無效的選項，請輸入 0 到 10。' -ForegroundColor Red
                 $null = Read-Host '按 Enter 返回選單'
             }
         }

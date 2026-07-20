@@ -56,6 +56,184 @@ function Resolve-AgentRulesConfigPath {
     return [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot $ConfigPath))
 }
 
+function Get-AgentRulesSettingsPath {
+    if (-not [string]::IsNullOrWhiteSpace($env:AGENTRULES_SETTINGS_PATH)) {
+        return [System.IO.Path]::GetFullPath(
+            [System.Environment]::ExpandEnvironmentVariables($env:AGENTRULES_SETTINGS_PATH)
+        )
+    }
+
+    $localAppData = [System.Environment]::GetFolderPath(
+        [System.Environment+SpecialFolder]::LocalApplicationData
+    )
+    if ([string]::IsNullOrWhiteSpace($localAppData)) {
+        throw '無法取得 LOCALAPPDATA，不能決定使用者設定檔位置。'
+    }
+
+    return Join-Path (Join-Path $localAppData 'AgentRules') 'settings.json'
+}
+
+function ConvertTo-AgentRulesDestinationPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $expandedPath = [System.Environment]::ExpandEnvironmentVariables($Path.Trim())
+    if ([string]::IsNullOrWhiteSpace($expandedPath)) {
+        throw 'Agent 全域目錄不可為空。'
+    }
+
+    $fullPath = [System.IO.Path]::GetFullPath($expandedPath)
+    if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+        throw "Agent 全域目錄不可指向檔案：$fullPath"
+    }
+    return $fullPath
+}
+
+function Read-AgentRulesUserSettings {
+    param([string]$SettingsPath = (Get-AgentRulesSettingsPath))
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($SettingsPath)
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        $settings = (Read-Utf8Text -LiteralPath $resolvedPath) | ConvertFrom-Json
+    }
+    catch {
+        throw "使用者設定檔無法解析：$resolvedPath。$($_.Exception.Message)"
+    }
+
+    if (($settings.version -ne 1) -or ($settings.initialized -ne $true)) {
+        throw "使用者設定檔格式無效：$resolvedPath"
+    }
+    if ($null -eq $settings.destinations) {
+        throw "使用者設定檔缺少 destinations：$resolvedPath"
+    }
+
+    $destinations = [ordered]@{}
+    foreach ($targetName in @('Codex', 'Antigravity')) {
+        $property = $settings.destinations.PSObject.Properties[$targetName]
+        if (($null -eq $property) -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+            throw "使用者設定檔缺少 $targetName 全域目錄：$resolvedPath"
+        }
+        $destinations[$targetName] = ConvertTo-AgentRulesDestinationPath -Path ([string]$property.Value)
+    }
+
+    return [pscustomobject]@{
+        Version = 1
+        Initialized = $true
+        SettingsPath = $resolvedPath
+        Destinations = [pscustomobject]$destinations
+    }
+}
+
+function Save-AgentRulesUserSettings {
+    param(
+        [Parameter(Mandatory = $true)][string]$CodexDestination,
+        [Parameter(Mandatory = $true)][string]$AntigravityDestination,
+        [string]$SettingsPath = (Get-AgentRulesSettingsPath)
+    )
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($SettingsPath)
+    $codexPath = ConvertTo-AgentRulesDestinationPath -Path $CodexDestination
+    $antigravityPath = ConvertTo-AgentRulesDestinationPath -Path $AntigravityDestination
+    $settings = [ordered]@{
+        version = 1
+        initialized = $true
+        destinations = [ordered]@{
+            Codex = $codexPath
+            Antigravity = $antigravityPath
+        }
+    }
+    $content = ($settings | ConvertTo-Json -Depth 4) + "`n"
+    $temporaryPath = $resolvedPath + '.tmp-' + [System.Guid]::NewGuid().ToString('N')
+
+    try {
+        Write-Utf8NoBomText -LiteralPath $temporaryPath -Content $content
+        Move-Item -LiteralPath $temporaryPath -Destination $resolvedPath -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+    }
+
+    return Read-AgentRulesUserSettings -SettingsPath $resolvedPath
+}
+
+function Get-AgentRulesDetectionCandidates {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Codex', 'Antigravity')]
+        [string]$TargetName
+    )
+
+    $candidateValues = if ($TargetName -eq 'Codex') {
+        @($env:CODEX_HOME, (Join-Path $HOME '.codex'))
+    }
+    else {
+        @($env:GEMINI_HOME, (Join-Path $HOME '.gemini'))
+    }
+
+    $candidates = @()
+    foreach ($candidateValue in $candidateValues) {
+        if ([string]::IsNullOrWhiteSpace([string]$candidateValue)) {
+            continue
+        }
+        try {
+            $candidate = ConvertTo-AgentRulesDestinationPath -Path ([string]$candidateValue)
+        }
+        catch {
+            continue
+        }
+        if (-not ($candidates -contains $candidate)) {
+            $candidates += $candidate
+        }
+        if ($candidates.Count -ge 3) {
+            break
+        }
+    }
+    return $candidates
+}
+
+function Find-AgentRulesGlobalDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Codex', 'Antigravity')]
+        [string]$TargetName,
+
+        [ValidateRange(1, 10)]
+        [int]$MaximumAttempts = 3
+    )
+
+    $attemptCount = 0
+    $detectedPath = $null
+    $candidates = @(Get-AgentRulesDetectionCandidates -TargetName $TargetName)
+    foreach ($candidate in $candidates) {
+        if ($attemptCount -ge $MaximumAttempts) {
+            break
+        }
+        $attemptCount++
+        try {
+            if (Test-Path -LiteralPath $candidate -PathType Container -ErrorAction Stop) {
+                $detectedPath = $candidate
+                break
+            }
+        }
+        catch {
+            continue
+        }
+    }
+
+    return [pscustomobject]@{
+        TargetName = $TargetName
+        Path = $detectedPath
+        Success = -not [string]::IsNullOrWhiteSpace($detectedPath)
+        AttemptCount = $attemptCount
+        MaximumAttempts = $MaximumAttempts
+    }
+}
+
 function ConvertTo-NormalizedMarkdown {
     param([Parameter(Mandatory = $true)][string]$Content)
 
@@ -143,10 +321,16 @@ function Get-AgentRulesContext {
         throw '設定檔 version 必須是 2。'
     }
 
+    $userSettings = $null
+    if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+        $userSettings = Read-AgentRulesUserSettings
+    }
+
     return [pscustomobject]@{
         RepositoryRoot = $repositoryRoot
         ConfigPath = $resolvedConfigPath
         Config = $config
+        UserSettings = $userSettings
     }
 }
 
@@ -211,7 +395,15 @@ function Get-TargetConfiguration {
         }
     }
 
-    $expandedDestination = [System.Environment]::ExpandEnvironmentVariables([string]$targetConfig.destination)
+    $configuredDestination = [string]$targetConfig.destination
+    if ($null -ne $Context.UserSettings) {
+        $settingsProperty = $Context.UserSettings.Destinations.PSObject.Properties[$TargetName]
+        if ($null -ne $settingsProperty) {
+            $configuredDestination = [string]$settingsProperty.Value
+        }
+    }
+
+    $expandedDestination = [System.Environment]::ExpandEnvironmentVariables($configuredDestination)
     if ([string]::IsNullOrWhiteSpace($expandedDestination)) {
         throw "$TargetName 的 destination 不可為空。"
     }

@@ -9,6 +9,7 @@ $sandboxRoot = Join-Path $PSScriptRoot '.sandbox'
 $sandboxRepository = Join-Path $sandboxRoot 'repository'
 $destinationRoot = Join-Path $sandboxRoot 'destinations'
 $testConfigPath = Join-Path $sandboxRepository 'config\test-targets.json'
+$testSettingsPath = Join-Path $sandboxRoot 'user-settings\settings.json'
 $script:Passed = 0
 $script:Failed = 0
 
@@ -42,7 +43,10 @@ function Invoke-TestScript {
 }
 
 function Invoke-InteractiveMenuCheck {
-    param([Parameter(Mandatory = $true)][string]$EntryPoint)
+    param(
+        [Parameter(Mandatory = $true)][string]$EntryPoint,
+        [string[]]$InputLines = @('1', '', '0')
+    )
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = 'cmd.exe'
@@ -56,9 +60,9 @@ function Invoke-InteractiveMenuCheck {
 
     $process = [System.Diagnostics.Process]::Start($startInfo)
     try {
-        $process.StandardInput.WriteLine('1')
-        $process.StandardInput.WriteLine('')
-        $process.StandardInput.WriteLine('0')
+        foreach ($inputLine in $InputLines) {
+            $process.StandardInput.WriteLine($inputLine)
+        }
         $process.StandardInput.Close()
         $standardOutput = $process.StandardOutput.ReadToEnd()
         $standardError = $process.StandardError.ReadToEnd()
@@ -150,6 +154,75 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($testConfigPath, $json, $utf8NoBom)
 $configArguments = @('-ConfigPath', $testConfigPath)
 
+$originalSettingsPath = $env:AGENTRULES_SETTINGS_PATH
+$originalCodexHome = $env:CODEX_HOME
+$originalGeminiHome = $env:GEMINI_HOME
+$env:AGENTRULES_SETTINGS_PATH = $testSettingsPath
+
+. (Join-Path $sandboxRepository 'scripts\AgentRules.Common.ps1')
+
+$missingSettings = Read-AgentRulesUserSettings
+Write-TestResult `
+    -Name 'Missing user settings are treated as first launch' `
+    -Success ($null -eq $missingSettings) `
+    -Detail 'Expected no initialized settings'
+
+$detectedCodex = Join-Path $sandboxRoot 'detected\codex'
+$detectedAntigravity = Join-Path $sandboxRoot 'detected\antigravity'
+[System.IO.Directory]::CreateDirectory($detectedCodex) | Out-Null
+[System.IO.Directory]::CreateDirectory($detectedAntigravity) | Out-Null
+$env:CODEX_HOME = $detectedCodex
+$env:GEMINI_HOME = $detectedAntigravity
+$codexDetection = Find-AgentRulesGlobalDirectory -TargetName 'Codex' -MaximumAttempts 3
+$antigravityDetection = Find-AgentRulesGlobalDirectory -TargetName 'Antigravity' -MaximumAttempts 3
+Write-TestResult `
+    -Name 'Global directory detection prefers configured candidates' `
+    -Success (
+        $codexDetection.Success -and
+        $antigravityDetection.Success -and
+        ($codexDetection.Path -eq $detectedCodex) -and
+        ($antigravityDetection.Path -eq $detectedAntigravity)
+    ) `
+    -Detail "Codex: $($codexDetection.Path); Antigravity: $($antigravityDetection.Path)"
+
+$env:CODEX_HOME = Join-Path $sandboxRoot 'missing-codex'
+$limitedDetection = Find-AgentRulesGlobalDirectory -TargetName 'Codex' -MaximumAttempts 1
+Write-TestResult `
+    -Name 'Directory detection stops at the attempt limit' `
+    -Success ((-not $limitedDetection.Success) -and ($limitedDetection.AttemptCount -eq 1)) `
+    -Detail "Success: $($limitedDetection.Success); attempts: $($limitedDetection.AttemptCount)"
+
+$savedSettings = Save-AgentRulesUserSettings `
+    -CodexDestination $detectedCodex `
+    -AntigravityDestination $detectedAntigravity
+$loadedSettings = Read-AgentRulesUserSettings
+Write-TestResult `
+    -Name 'User directory settings round trip as UTF-8 JSON' `
+    -Success (
+        (Test-Path -LiteralPath $testSettingsPath -PathType Leaf) -and
+        ($loadedSettings.Destinations.Codex -eq $detectedCodex) -and
+        ($loadedSettings.Destinations.Antigravity -eq $detectedAntigravity)
+    ) `
+    -Detail "Settings path: $($savedSettings.SettingsPath)"
+
+$defaultContext = Get-AgentRulesContext
+$defaultCodexConfiguration = Get-TargetConfiguration `
+    -Context $defaultContext `
+    -TargetName 'Codex'
+Write-TestResult `
+    -Name 'Default configuration uses saved user destination' `
+    -Success ($defaultCodexConfiguration.DestinationRoot -eq $detectedCodex) `
+    -Detail "Destination: $($defaultCodexConfiguration.DestinationRoot)"
+
+$customContext = Get-AgentRulesContext -ConfigPath $testConfigPath
+$customCodexConfiguration = Get-TargetConfiguration `
+    -Context $customContext `
+    -TargetName 'Codex'
+Write-TestResult `
+    -Name 'Explicit ConfigPath remains isolated from user settings' `
+    -Success ($customCodexConfiguration.DestinationRoot -eq (Join-Path $destinationRoot 'codex')) `
+    -Detail "Destination: $($customCodexConfiguration.DestinationRoot)"
+
 $entryPoint = Join-Path $sandboxRepository 'AgentRules.cmd'
 & $entryPoint help | Out-Host
 $exitCode = $LASTEXITCODE
@@ -167,10 +240,34 @@ Write-TestResult `
     -Success (($exitCode -eq 0) -and (Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)) `
     -Detail "Exit code $exitCode; output exists: $(Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)"
 
-$interactiveResult = Invoke-InteractiveMenuCheck -EntryPoint $entryPoint
+Remove-Item -LiteralPath $testSettingsPath -Force
+$firstLaunchResult = Invoke-InteractiveMenuCheck `
+    -EntryPoint $entryPoint `
+    -InputLines @('2', $detectedCodex, $detectedAntigravity, 'y', '0')
+$firstLaunchSettings = Read-AgentRulesUserSettings
 Write-TestResult `
-    -Name 'Interactive menu preserves child log output' `
-    -Success (($interactiveResult.ExitCode -eq 0) -and ($interactiveResult.StandardOutput -match '\[SUMMARY\]')) `
+    -Name 'First launch accepts manual global directories' `
+    -Success (
+        ($firstLaunchResult.ExitCode -eq 0) -and
+        ($null -ne $firstLaunchSettings) -and
+        ($firstLaunchSettings.Destinations.Codex -eq $detectedCodex) -and
+        ($firstLaunchSettings.Destinations.Antigravity -eq $detectedAntigravity)
+    ) `
+    -Detail "Exit code $($firstLaunchResult.ExitCode); stderr: $($firstLaunchResult.StandardError)"
+
+$interactiveResult = Invoke-InteractiveMenuCheck -EntryPoint $entryPoint
+$menuSource = [System.IO.File]::ReadAllText(
+    (Join-Path $sandboxRepository 'scripts\AgentRules.Menu.ps1'),
+    [System.Text.Encoding]::UTF8
+)
+Write-TestResult `
+    -Name 'Interactive menu preserves child log output and shows directory actions' `
+    -Success (
+        ($interactiveResult.ExitCode -eq 0) -and
+        ($interactiveResult.StandardOutput -match '\[SUMMARY\]') -and
+        ($menuSource -match "Write-Host '9\. 修改 Agent 目錄'") -and
+        ($menuSource -match "Write-Host '10\. 重新偵測 Agent 目錄'")
+    ) `
     -Detail "Exit code $($interactiveResult.ExitCode); stderr: $($interactiveResult.StandardError)"
 
 $backupRoot = Join-Path $sandboxRepository 'backups'
@@ -328,6 +425,10 @@ $exitCode = Invoke-TestScript -ScriptName 'Check-AgentRules.ps1' -Arguments (@('
 Write-TestResult -Name 'Final no-difference check' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"
 
 Write-Host
+$env:AGENTRULES_SETTINGS_PATH = $originalSettingsPath
+$env:CODEX_HOME = $originalCodexHome
+$env:GEMINI_HOME = $originalGeminiHome
+
 if ($script:Failed -gt 0) {
     Write-Host `
         "[SUMMARY] 測試結果：Passed: $script:Passed; Failed: $script:Failed" `

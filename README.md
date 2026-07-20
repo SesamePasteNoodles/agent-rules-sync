@@ -76,7 +76,11 @@ dist/**
 | Codex | 精簡核心＋原生 Skills | `%USERPROFILE%\.codex\AGENTS.md` 與 `%USERPROFILE%\.codex\skills\<skill-name>\SKILL.md` |
 | Antigravity | 精簡核心＋原生 Skills | `%USERPROFILE%\.gemini\GEMINI.md` 與 `%USERPROFILE%\.gemini\config\skills\<skill-name>\SKILL.md` |
 
-目的地與管理白名單集中在 `config/targets.json`。建置會驗證白名單，不允許設定額外檔案；同步器只管理本專案列出的 Skill，不會修改 `skills.json` 或其他既有 Skills。
+預設目的地與管理白名單集中在 `config/targets.json`。互動介面首次啟動時，會讓使用者選擇有限次數的自動偵測或手動輸入，並將確認後的全域目錄保存至 `%LOCALAPPDATA%\AgentRules\settings.json`。個人設定只覆寫目的地，不修改專案設定或管理白名單。
+
+自動偵測不會遞迴掃描磁碟；每個 Agent 最多檢查 3 個已知候選位置。Codex 依序考慮 `CODEX_HOME` 與 `%USERPROFILE%\.codex`，Antigravity 依序考慮 `GEMINI_HOME` 與 `%USERPROFILE%\.gemini`。偵測失敗的項目會改由使用者輸入。
+
+建置會驗證白名單，不允許設定額外檔案；同步器只管理本專案列出的 Skill，不會修改 `skills.json` 或其他既有 Skills。命令列明確傳入 `-ConfigPath` 時不載入個人設定，方便隔離測試或使用另一份完整設定。
 
 ## 核心規則與 Skills
 
@@ -113,7 +117,15 @@ AgentRules.cmd
 ```
 
 `AgentRules.cmd` 只負責以一致的參數啟動 PowerShell；互動介面與命令路由集中在
-`scripts/AgentRules.Menu.ps1`。雙擊後會開啟：
+`scripts/AgentRules.Menu.ps1`。首次啟動且尚無個人設定時，會先顯示：
+
+```text
+1. 自動偵測
+2. 手動輸入
+0. 離開
+```
+
+完成設定後會開啟：
 
 ```text
 1. 檢查狀態
@@ -122,10 +134,16 @@ AgentRules.cmd
 4. 僅同步 Codex
 5. 僅同步 Antigravity
 6. 執行測試
+7. 預覽備份清理
+8. 清理過期備份
+9. 修改 Agent 目錄
+10. 重新偵測 Agent 目錄
 0. 離開
 ```
 
-互動選單在實際同步前會再次確認。也可在 CMD 或 PowerShell 使用簡短命令：
+「修改 Agent 目錄」可逐項輸入，直接按 Enter 會保留目前值；「重新偵測 Agent 目錄」會再次執行有限候選位置偵測，顯示結果並在確認後才覆寫設定。互動選單在實際同步前也會再次確認。
+
+也可在 CMD 或 PowerShell 使用簡短命令：
 
 ```powershell
 .\AgentRules.cmd check
