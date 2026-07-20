@@ -81,6 +81,40 @@ dist/**
 
 建置產物使用 .NET 明確輸出 UTF-8（無 BOM）。腳本本身使用 UTF-8 BOM，避免 Windows PowerShell 5.1 將中文訊息誤判為 ANSI；PowerShell 7 亦可正常執行。
 
+## 簡易操作
+
+直接雙擊根目錄的：
+
+```text
+AgentRules.cmd
+```
+
+會開啟互動選單：
+
+```text
+1. Check status
+2. Preview sync
+3. Sync all
+4. Sync Codex only
+5. Sync Antigravity only
+6. Run tests
+0. Exit
+```
+
+互動選單在實際同步前會再次確認。也可在 CMD 或 PowerShell 使用簡短命令：
+
+```powershell
+.\AgentRules.cmd check
+.\AgentRules.cmd preview
+.\AgentRules.cmd sync
+.\AgentRules.cmd codex
+.\AgentRules.cmd antigravity
+.\AgentRules.cmd build
+.\AgentRules.cmd test
+```
+
+其中 `sync`、`codex`、`antigravity` 是明確的實際部署命令，從命令列執行時不會再次詢問；若只想查看變更，使用 `preview`。
+
 ## 建置
 
 建置只更新 `dist/`，不修改 Agent 全域目錄：
