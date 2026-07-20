@@ -14,6 +14,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:RepositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$script:LastCommandExitCode = 0
 
 function Write-AgentRulesMenuHeader {
     Clear-Host
@@ -52,11 +53,13 @@ function Invoke-AgentRulesChildScript {
     $scriptPath = Join-Path $script:RepositoryRoot $RelativePath
     if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
         Write-Host "[ERROR] 找不到必要腳本：$scriptPath" -ForegroundColor Red
-        return 2
+        $script:LastCommandExitCode = 2
+        return
     }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath @Arguments | Out-Host
-    return $LASTEXITCODE
+    # Keep the child process attached to the current console so Write-Host colors are preserved.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath @Arguments
+    $script:LastCommandExitCode = $LASTEXITCODE
 }
 
 function Invoke-AgentRulesCommand {
@@ -68,25 +71,25 @@ function Invoke-AgentRulesCommand {
 
     switch ($Name) {
         'check' {
-            return Invoke-AgentRulesChildScript -RelativePath 'scripts\Check-AgentRules.ps1' -Arguments @('-Target', 'All')
+            Invoke-AgentRulesChildScript -RelativePath 'scripts\Check-AgentRules.ps1' -Arguments @('-Target', 'All')
         }
         'preview' {
-            return Invoke-AgentRulesChildScript -RelativePath 'scripts\Sync-AgentRules.ps1' -Arguments @('-Target', 'All')
+            Invoke-AgentRulesChildScript -RelativePath 'scripts\Sync-AgentRules.ps1' -Arguments @('-Target', 'All')
         }
         'sync' {
-            return Invoke-AgentRulesChildScript -RelativePath 'scripts\Sync-AgentRules.ps1' -Arguments @('-Target', 'All', '-Apply')
+            Invoke-AgentRulesChildScript -RelativePath 'scripts\Sync-AgentRules.ps1' -Arguments @('-Target', 'All', '-Apply')
         }
         'codex' {
-            return Invoke-AgentRulesChildScript -RelativePath 'scripts\Sync-AgentRules.ps1' -Arguments @('-Target', 'Codex', '-Apply')
+            Invoke-AgentRulesChildScript -RelativePath 'scripts\Sync-AgentRules.ps1' -Arguments @('-Target', 'Codex', '-Apply')
         }
         'antigravity' {
-            return Invoke-AgentRulesChildScript -RelativePath 'scripts\Sync-AgentRules.ps1' -Arguments @('-Target', 'Antigravity', '-Apply')
+            Invoke-AgentRulesChildScript -RelativePath 'scripts\Sync-AgentRules.ps1' -Arguments @('-Target', 'Antigravity', '-Apply')
         }
         'build' {
-            return Invoke-AgentRulesChildScript -RelativePath 'scripts\Build-AgentRules.ps1' -Arguments @('-Target', 'All')
+            Invoke-AgentRulesChildScript -RelativePath 'scripts\Build-AgentRules.ps1' -Arguments @('-Target', 'All')
         }
         'test' {
-            return Invoke-AgentRulesChildScript -RelativePath 'tests\Test-AgentRules.ps1'
+            Invoke-AgentRulesChildScript -RelativePath 'tests\Test-AgentRules.ps1'
         }
     }
 }
@@ -131,7 +134,7 @@ function Show-AgentRulesMenu {
 
         $selection = Read-Host '請選擇'
         if ($null -eq $selection) {
-            return 0
+            return
         }
         $selection = $selection.Trim()
         $commandName = $null
@@ -154,7 +157,7 @@ function Show-AgentRulesMenu {
                 }
             }
             '6' { $commandName = 'test' }
-            '0' { return 0 }
+            '0' { return }
             default {
                 Write-Host
                 Write-Host '[ERROR] 無效的選項，請輸入 0 到 6。' -ForegroundColor Red
@@ -163,8 +166,8 @@ function Show-AgentRulesMenu {
         }
 
         if ($null -ne $commandName) {
-            $exitCode = Invoke-AgentRulesCommand -Name $commandName
-            Show-AgentRulesCommandResult -ExitCode $exitCode
+            Invoke-AgentRulesCommand -Name $commandName
+            Show-AgentRulesCommandResult -ExitCode $script:LastCommandExitCode
         }
     }
 }
@@ -186,7 +189,8 @@ if ($unexpectedArguments.Count -gt 0) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Command)) {
-    exit (Show-AgentRulesMenu)
+    Show-AgentRulesMenu
+    exit 0
 }
 
 $normalizedCommand = $Command.ToLowerInvariant()
@@ -202,4 +206,5 @@ if ($normalizedCommand -notin @('check', 'preview', 'sync', 'codex', 'antigravit
     exit 2
 }
 
-exit (Invoke-AgentRulesCommand -Name $normalizedCommand)
+Invoke-AgentRulesCommand -Name $normalizedCommand
+exit $script:LastCommandExitCode

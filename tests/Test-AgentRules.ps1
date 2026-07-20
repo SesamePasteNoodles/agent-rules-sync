@@ -41,6 +41,40 @@ function Invoke-TestScript {
     return $exitCode
 }
 
+function Invoke-InteractiveMenuCheck {
+    param([Parameter(Mandatory = $true)][string]$EntryPoint)
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = 'cmd.exe'
+    $startInfo.Arguments = '/d /c ""{0}""' -f $EntryPoint
+    $startInfo.WorkingDirectory = Split-Path -Parent $EntryPoint
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    try {
+        $process.StandardInput.WriteLine('1')
+        $process.StandardInput.WriteLine('')
+        $process.StandardInput.WriteLine('0')
+        $process.StandardInput.Close()
+        $standardOutput = $process.StandardOutput.ReadToEnd()
+        $standardError = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StandardOutput = $standardOutput
+            StandardError = $standardError
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
 function Get-TreeHashes {
     param([Parameter(Mandatory = $true)][string]$Root)
 
@@ -125,6 +159,12 @@ Write-TestResult `
     -Success (($exitCode -eq 0) -and (Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)) `
     -Detail "Exit code $exitCode; output exists: $(Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)"
 
+$interactiveResult = Invoke-InteractiveMenuCheck -EntryPoint $entryPoint
+Write-TestResult `
+    -Name 'Interactive menu preserves child log output' `
+    -Success (($interactiveResult.ExitCode -eq 0) -and ($interactiveResult.StandardOutput -match '\[SUMMARY\]')) `
+    -Detail "Exit code $($interactiveResult.ExitCode); stderr: $($interactiveResult.StandardError)"
+
 $exitCode = Invoke-TestScript -ScriptName 'Build-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Write-TestResult -Name 'Build all targets' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"
 
@@ -201,8 +241,19 @@ Write-TestResult -Name 'Missing source stops build' -Success ($exitCode -eq 2) -
 $exitCode = Invoke-TestScript -ScriptName 'Check-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Write-TestResult -Name 'Final no-difference check' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"
 
-Write-Host "[RESULT] Passed: $script:Passed; Failed: $script:Failed"
+Write-Host
 if ($script:Failed -gt 0) {
+    Write-Host `
+        "[SUMMARY] 測試結果：Passed: $script:Passed; Failed: $script:Failed" `
+        -ForegroundColor White `
+        -BackgroundColor Red
+    Write-Host
     exit 1
 }
+
+Write-Host `
+    "[SUMMARY] 測試結果：Passed: $script:Passed; Failed: $script:Failed" `
+    -ForegroundColor Black `
+    -BackgroundColor Yellow
+Write-Host
 exit 0
