@@ -41,11 +41,19 @@ function Invoke-TargetSync {
 
     if ($changes.Count -eq 0) {
         Write-AgentRulesLog -Level 'OK' -Message "$TargetName 無需同步。"
-        return
+        return [pscustomobject]@{
+            TargetName = $TargetName
+            ChangeCount = 0
+            Applied = $ShouldApply
+        }
     }
     if (-not $ShouldApply) {
         Write-AgentRulesLog -Level 'INFO' -Message "$TargetName 為預覽模式；未修改目的地。"
-        return
+        return [pscustomobject]@{
+            TargetName = $TargetName
+            ChangeCount = $changes.Count
+            Applied = $false
+        }
     }
 
     if (-not $ShouldBackup -and -not $AllowForce) {
@@ -115,6 +123,11 @@ function Invoke-TargetSync {
             }
         }
         Write-AgentRulesLog -Level 'OK' -Message "$TargetName 同步完成，共 $($changes.Count) 個檔案。"
+        return [pscustomobject]@{
+            TargetName = $TargetName
+            ChangeCount = $changes.Count
+            Applied = $true
+        }
     }
     catch {
         Write-AgentRulesLog -Level 'ERROR' -Message "$TargetName 同步失敗，開始回復：$($_.Exception.Message)"
@@ -145,11 +158,12 @@ try {
         Write-AgentRulesLog -Level 'INFO' -Message '-Force 已啟用；第一階段仍不會越過白名單或來源完整性檢查。'
     }
 
+    $syncResults = @()
     foreach ($targetName in $targetNames) {
         Write-AgentRulesLog -Level 'INFO' -Message "建置 $targetName"
         $artifacts = @(Invoke-AgentRulesBuild -Context $context -TargetName $targetName)
         $targetConfiguration = Get-TargetConfiguration -Context $context -TargetName $targetName
-        Invoke-TargetSync `
+        $syncResults += Invoke-TargetSync `
             -Context $context `
             -TargetName $targetName `
             -Artifacts $artifacts `
@@ -159,16 +173,47 @@ try {
             -AllowForce $Force.IsPresent
     }
 
+    $totalChanges = ($syncResults | Measure-Object -Property ChangeCount -Sum).Sum
+    if ($null -eq $totalChanges) {
+        $totalChanges = 0
+    }
+    $changedTargets = @(
+        $syncResults |
+            Where-Object { $_.ChangeCount -gt 0 } |
+            ForEach-Object { "$($_.TargetName) $($_.ChangeCount) 個" }
+    )
+    $changeDescription = $changedTargets -join '；'
+
     if (-not $Apply) {
         Write-AgentRulesLog -Level 'INFO' -Message '預覽完成；使用 -Apply 才會修改目的地。'
+        if ($totalChanges -gt 0) {
+            Write-AgentRulesLog -Level 'SUMMARY' -Message (
+                "結論：預覽成功，共有 $totalChanges 個檔案需要同步（$changeDescription），本次未修改全域目錄。" +
+                '下一步：確認上方沒有 [ERROR] 後，選 3 同步全部。'
+            )
+        }
+        else {
+            Write-AgentRulesLog -Level 'SUMMARY' -Message '結論：沒有需要同步的變更，本次未修改全域目錄。下一步：可安全離開。'
+        }
+    }
+    elseif ($totalChanges -gt 0) {
+        Write-AgentRulesLog -Level 'SUMMARY' -Message (
+            "結論：同步成功，共更新 $totalChanges 個檔案（$changeDescription）。" +
+            '下一步：選 1 檢查狀態，確認結果為 exit code 0。'
+        )
+    }
+    else {
+        Write-AgentRulesLog -Level 'SUMMARY' -Message '結論：全域規則原本就是最新版本，沒有修改任何檔案。下一步：可安全離開。'
     }
     exit 0
 }
 catch [System.UnauthorizedAccessException] {
     Write-AgentRulesLog -Level 'ERROR' -Message $_.Exception.Message
+    Write-AgentRulesLog -Level 'SUMMARY' -Message '結論：同步失敗，無法存取目的地。下一步：確認權限後重新預覽。'
     exit 3
 }
 catch {
     Write-AgentRulesLog -Level 'ERROR' -Message $_.Exception.Message
+    Write-AgentRulesLog -Level 'SUMMARY' -Message '結論：同步失敗。下一步：先處理上方 [ERROR]，不要重複覆蓋。'
     exit 2
 }

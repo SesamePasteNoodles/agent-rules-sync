@@ -20,7 +20,7 @@ $script:RuleDefinitions = @(
 function Write-AgentRulesLog {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('INFO', 'CHECK', 'CHANGE', 'BACKUP', 'OK', 'WARN', 'ERROR')]
+        [ValidateSet('INFO', 'CHECK', 'CHANGE', 'BACKUP', 'OK', 'WARN', 'ERROR', 'SUMMARY')]
         [string]$Level,
 
         [Parameter(Mandatory = $true)]
