@@ -1,3 +1,13 @@
+---
+name: agent-rules-security
+description: Use when work involves credentials, permissions, authentication, authorization, personal data, payments, file uploads, external communications, data mutation, deletion, or irreversible operations.
+---
+
+<!--
+此檔案由同步系統自動產生。
+請勿直接修改，來源位於 AI Agent 規範專案。
+-->
+
 # 安全性規則
 
 - 不得將密碼、Token、API Key、連線字串、私鑰或其他敏感資訊寫入程式碼、輸出、日誌或版本控制。

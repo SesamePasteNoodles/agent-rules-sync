@@ -1,3 +1,8 @@
+---
+name: agent-rules-terminal
+description: Use when running terminal, shell, build, package-manager, compiler, formatter, linter, server, watcher, or other command-line operations.
+---
+
 <!--
 此檔案由同步系統自動產生。
 請勿直接修改，來源位於 AI Agent 規範專案。

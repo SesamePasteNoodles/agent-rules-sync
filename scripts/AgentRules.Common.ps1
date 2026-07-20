@@ -8,13 +8,13 @@ $script:GeneratedWarning = @'
 -->
 '@
 
-$script:RuleDefinitions = @(
-    [pscustomobject]@{ File = 'development.md'; Title = '程式開發規則' }
-    [pscustomobject]@{ File = 'documents.md'; Title = '文件處理規則' }
-    [pscustomobject]@{ File = 'terminal.md'; Title = '命令執行規則' }
-    [pscustomobject]@{ File = 'git.md'; Title = 'Git 與版本控制規則' }
-    [pscustomobject]@{ File = 'security.md'; Title = '安全性規則' }
-    [pscustomobject]@{ File = 'testing.md'; Title = '測試與驗證規則' }
+$script:SkillNames = @(
+    'agent-rules-development'
+    'agent-rules-documents'
+    'agent-rules-terminal'
+    'agent-rules-git'
+    'agent-rules-security'
+    'agent-rules-testing'
 )
 
 function Write-AgentRulesLog {
@@ -139,6 +139,9 @@ function Get-AgentRulesContext {
     if ($null -eq $config.targets) {
         throw '設定檔缺少 targets。'
     }
+    if ($config.version -ne 2) {
+        throw '設定檔 version 必須是 2。'
+    }
 
     return [pscustomobject]@{
         RepositoryRoot = $repositoryRoot
@@ -174,18 +177,13 @@ function Get-SelectedTargetNames {
 function Get-ExpectedManagedFiles {
     param([Parameter(Mandatory = $true)][ValidateSet('Codex', 'Antigravity')][string]$TargetName)
 
-    if ($TargetName -eq 'Codex') {
-        return @(
-            'AGENTS.md',
-            'rules/development.md',
-            'rules/documents.md',
-            'rules/git.md',
-            'rules/security.md',
-            'rules/terminal.md',
-            'rules/testing.md'
-        )
+    $entryFile = if ($TargetName -eq 'Codex') { 'AGENTS.md' } else { 'GEMINI.md' }
+    $skillPrefix = if ($TargetName -eq 'Codex') { 'skills' } else { 'config/skills' }
+    $files = @($entryFile)
+    foreach ($skillName in $script:SkillNames) {
+        $files += "$skillPrefix/$skillName/SKILL.md"
     }
-    return @('GEMINI.md')
+    return $files
 }
 
 function Get-TargetConfiguration {
@@ -195,7 +193,7 @@ function Get-TargetConfiguration {
     )
 
     $targetConfig = $Context.Config.targets.PSObject.Properties[$TargetName].Value
-    $expectedMode = if ($TargetName -eq 'Codex') { 'modular' } else { 'single-file' }
+    $expectedMode = 'core-with-skills'
     if ($targetConfig.outputMode -ne $expectedMode) {
         throw "$TargetName 的 outputMode 必須是 $expectedMode。"
     }
@@ -236,11 +234,74 @@ function Get-TargetConfiguration {
     }
 }
 
-function Remove-FirstMarkdownHeading {
-    param([Parameter(Mandatory = $true)][string]$Content)
+function Get-ValidatedSkillSource {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)][string]$SkillName
+    )
 
-    $normalized = ConvertTo-NormalizedMarkdown -Content $Content
-    return ($normalized -replace '^\s*#\s+[^\n]+\n+', '').Trim()
+    if ($SkillName -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') {
+        throw "Skill 名稱格式無效：$SkillName"
+    }
+
+    $sourcePath = Join-Path (Join-Path (Join-Path $Context.RepositoryRoot 'src') 'skills') "$SkillName\SKILL.md"
+    $content = ConvertTo-NormalizedMarkdown -Content (Read-Utf8Text -LiteralPath $sourcePath)
+    $frontmatterMatch = [System.Text.RegularExpressions.Regex]::Match(
+        $content,
+        '\A---\n(?<frontmatter>.*?)\n---\n(?<body>[\s\S]*)\z',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline
+    )
+    if (-not $frontmatterMatch.Success) {
+        throw "Skill 缺少有效的 YAML frontmatter：$sourcePath"
+    }
+
+    $frontmatter = $frontmatterMatch.Groups['frontmatter'].Value
+    $nameMatch = [System.Text.RegularExpressions.Regex]::Match(
+        $frontmatter,
+        '(?m)^name:\s*(?<value>[^\r\n#]+?)\s*$'
+    )
+    $descriptionMatch = [System.Text.RegularExpressions.Regex]::Match(
+        $frontmatter,
+        '(?m)^description:\s*(?<value>[^\r\n#]+?)\s*$'
+    )
+    if (-not $nameMatch.Success -or $nameMatch.Groups['value'].Value -ne $SkillName) {
+        throw "Skill frontmatter 的 name 必須等於目錄名稱：$SkillName"
+    }
+    if (-not $descriptionMatch.Success -or [string]::IsNullOrWhiteSpace($descriptionMatch.Groups['value'].Value)) {
+        throw "Skill frontmatter 缺少 description：$SkillName"
+    }
+    $description = $descriptionMatch.Groups['value'].Value.Trim()
+    if ($SkillName.Length -gt 64) {
+        throw "Skill 名稱不可超過 64 個字元：$SkillName"
+    }
+    if ($description.Length -gt 1024 -or $description.Contains('<') -or $description.Contains('>')) {
+        throw "Skill description 格式無效：$SkillName"
+    }
+    if ([string]::IsNullOrWhiteSpace($frontmatterMatch.Groups['body'].Value)) {
+        throw "Skill 內容不可為空：$SkillName"
+    }
+
+    return [pscustomobject]@{
+        Name = $SkillName
+        Frontmatter = $frontmatter
+        Description = $description
+        Body = $frontmatterMatch.Groups['body'].Value.Trim()
+    }
+}
+
+function ConvertTo-GeneratedSkillContent {
+    param([Parameter(Mandatory = $true)]$SkillSource)
+
+    $warning = (ConvertTo-NormalizedMarkdown -Content $script:GeneratedWarning).Trim()
+    return (
+        "---`n" +
+        $SkillSource.Frontmatter.Trim() +
+        "`n---`n`n" +
+        $warning +
+        "`n`n" +
+        $SkillSource.Body.Trim() +
+        "`n"
+    )
 }
 
 function Get-AgentRulesArtifacts {
@@ -257,56 +318,24 @@ function Get-AgentRulesArtifacts {
     $warning = ConvertTo-NormalizedMarkdown -Content $script:GeneratedWarning
     $artifacts = @()
 
-    foreach ($definition in $script:RuleDefinitions) {
-        $sourcePath = Join-Path (Join-Path $sourceRoot 'rules') $definition.File
-        $null = Read-Utf8Text -LiteralPath $sourcePath
-    }
-
-    if ($TargetName -eq 'Codex') {
-        $entryContent = $warning + "`n" + $header + "`n" + $core
-        $artifacts += [pscustomobject]@{
-            RelativePath = 'AGENTS.md'
-            Content = $entryContent
-            Hash = Get-TextSha256 -Content $entryContent
-        }
-
-        foreach ($definition in $script:RuleDefinitions) {
-            $ruleContent = ConvertTo-NormalizedMarkdown -Content (
-                Read-Utf8Text -LiteralPath (Join-Path (Join-Path $sourceRoot 'rules') $definition.File)
-            )
-            $outputContent = $warning + "`n" + $ruleContent
-            $relativePath = 'rules/{0}' -f $definition.File
-            $artifacts += [pscustomobject]@{
-                RelativePath = $relativePath
-                Content = $outputContent
-                Hash = Get-TextSha256 -Content $outputContent
-            }
-        }
-        return $artifacts
-    }
-
-    $sections = @(
-        [pscustomobject]@{ Title = 'Antigravity 專屬規則'; Content = Remove-FirstMarkdownHeading -Content $header }
-        [pscustomobject]@{ Title = '共用核心規範'; Content = Remove-FirstMarkdownHeading -Content $core }
-    )
-    foreach ($definition in $script:RuleDefinitions) {
-        $sourceContent = Read-Utf8Text -LiteralPath (Join-Path (Join-Path $sourceRoot 'rules') $definition.File)
-        $sections += [pscustomobject]@{
-            Title = $definition.Title
-            Content = Remove-FirstMarkdownHeading -Content $sourceContent
-        }
-    }
-
-    $parts = @($warning.Trim())
-    foreach ($section in $sections) {
-        $parts += ('# {0}' -f $section.Title)
-        $parts += $section.Content
-    }
-    $geminiContent = ($parts -join "`n`n").Trim() + "`n"
+    $entryContent = $warning + "`n" + $header + "`n" + $core
+    $entryRelativePath = if ($TargetName -eq 'Codex') { 'AGENTS.md' } else { 'GEMINI.md' }
     $artifacts += [pscustomobject]@{
-        RelativePath = 'GEMINI.md'
-        Content = $geminiContent
-        Hash = Get-TextSha256 -Content $geminiContent
+        RelativePath = $entryRelativePath
+        Content = $entryContent
+        Hash = Get-TextSha256 -Content $entryContent
+    }
+
+    $skillPrefix = if ($TargetName -eq 'Codex') { 'skills' } else { 'config/skills' }
+    foreach ($skillName in $script:SkillNames) {
+        $skillSource = Get-ValidatedSkillSource -Context $Context -SkillName $skillName
+        $skillContent = ConvertTo-GeneratedSkillContent -SkillSource $skillSource
+        $relativePath = "$skillPrefix/$skillName/SKILL.md"
+        $artifacts += [pscustomobject]@{
+            RelativePath = $relativePath
+            Content = $skillContent
+            Hash = Get-TextSha256 -Content $skillContent
+        }
     }
     return $artifacts
 }

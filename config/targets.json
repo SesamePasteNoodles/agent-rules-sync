@@ -1,27 +1,33 @@
 {
-  "version": 1,
+  "version": 2,
   "targets": {
     "Codex": {
       "enabled": true,
-      "outputMode": "modular",
+      "outputMode": "core-with-skills",
       "destination": "%USERPROFILE%\\.codex",
       "managedFiles": [
         "AGENTS.md",
-        "rules/development.md",
-        "rules/documents.md",
-        "rules/git.md",
-        "rules/security.md",
-        "rules/terminal.md",
-        "rules/testing.md"
+        "skills/agent-rules-development/SKILL.md",
+        "skills/agent-rules-documents/SKILL.md",
+        "skills/agent-rules-terminal/SKILL.md",
+        "skills/agent-rules-git/SKILL.md",
+        "skills/agent-rules-security/SKILL.md",
+        "skills/agent-rules-testing/SKILL.md"
       ]
     },
     "Antigravity": {
       "enabled": true,
-      "outputMode": "single-file",
+      "outputMode": "core-with-skills",
       "destination": "%USERPROFILE%\\.gemini",
       "maxCharacters": 12000,
       "managedFiles": [
-        "GEMINI.md"
+        "GEMINI.md",
+        "config/skills/agent-rules-development/SKILL.md",
+        "config/skills/agent-rules-documents/SKILL.md",
+        "config/skills/agent-rules-terminal/SKILL.md",
+        "config/skills/agent-rules-git/SKILL.md",
+        "config/skills/agent-rules-security/SKILL.md",
+        "config/skills/agent-rules-testing/SKILL.md"
       ]
     }
   }

@@ -1,7 +1,7 @@
-<!--
-此檔案由同步系統自動產生。
-請勿直接修改，來源位於 AI Agent 規範專案。
--->
+---
+name: agent-rules-git
+description: Use when inspecting or operating Git, commits, branches, staging, push, pull requests, merge, rebase, tags, releases, or repository history.
+---
 
 # Git 與版本控制規則
 

@@ -9,12 +9,12 @@
 
 ## 核心原則
 
-- `src/` 是唯一人工維護來源。
+- `src/` 是唯一人工維護來源；核心治理規則與按需 Skills 分開管理。
 - `targets/` 只放各 Agent 專屬補充。
 - `dist/` 與 Agent 全域規則都是建置或部署產物，不直接修改。
 - 未指定 `-Apply` 時，同步腳本不得修改 Agent 全域目錄。
 - 腳本只管理設定檔白名單內的檔案，不清空目錄、不碰認證、Session、快取、外掛或其他設定。
-- 同步前備份實際將被覆蓋的檔案，同步後驗證 SHA-256。
+- 同步前備份實際將被覆蓋的核心檔或 Skill，同步後驗證 SHA-256。
 
 ## 目錄結構
 
@@ -22,7 +22,9 @@
 .
 ├─ src/
 │  ├─ core.md
-│  └─ rules/
+│  └─ skills/
+│     └─ <skill-name>/
+│        └─ SKILL.md
 ├─ targets/
 │  ├─ codex-header.md
 │  └─ antigravity-header.md
@@ -45,7 +47,7 @@
 
 ```text
 src/core.md
-src/rules/*.md
+src/skills/*/SKILL.md
 ```
 
 Agent 專屬內容修改：
@@ -60,8 +62,9 @@ targets/antigravity-header.md
 ```text
 dist/**
 %USERPROFILE%\.codex\AGENTS.md
-%USERPROFILE%\.codex\rules\**
+%USERPROFILE%\.codex\skills\agent-rules-*\SKILL.md
 %USERPROFILE%\.gemini\GEMINI.md
+%USERPROFILE%\.gemini\config\skills\agent-rules-*\SKILL.md
 ```
 
 部署端與來源不同時，以來源重新建置與部署，不把部署端內容反向合併回來源。
@@ -70,10 +73,28 @@ dist/**
 
 | Agent | 輸出方式 | 目的地 |
 |---|---|---|
-| Codex | 模組化 | `%USERPROFILE%\.codex\AGENTS.md` 與 `%USERPROFILE%\.codex\rules\*.md` |
-| Antigravity | 單一檔案 | `%USERPROFILE%\.gemini\GEMINI.md` |
+| Codex | 精簡核心＋原生 Skills | `%USERPROFILE%\.codex\AGENTS.md` 與 `%USERPROFILE%\.codex\skills\<skill-name>\SKILL.md` |
+| Antigravity | 精簡核心＋原生 Skills | `%USERPROFILE%\.gemini\GEMINI.md` 與 `%USERPROFILE%\.gemini\config\skills\<skill-name>\SKILL.md` |
 
-目的地與管理白名單集中在 `config/targets.json`。第一階段會驗證白名單，不允許設定額外檔案。
+目的地與管理白名單集中在 `config/targets.json`。建置會驗證白名單，不允許設定額外檔案；同步器只管理本專案列出的 Skill，不會修改 `skills.json` 或其他既有 Skills。
+
+## 核心規則與 Skills
+
+`src/core.md` 只保留即使 Skill 未觸發也不得失效的治理底線，例如正確性、敏感資訊、權限、不可逆操作、既有變更保護與最低驗證要求。這些內容會始終載入至 `AGENTS.md` 或 `GEMINI.md`。
+
+詳細的開發、文件、命令、Git、安全與測試流程放在 `src/skills/`，由 Codex 或 Antigravity 根據 `SKILL.md` 的 `description` 語意匹配後按需載入。Skills 能降低常駐 Context，但語意匹配不是強制治理邊界，因此不可漏掉的規則不得只放在 Skill。
+
+每個 Skill 必須：
+
+- 使用安全且唯一的小寫連字號目錄名稱。
+- 包含 `SKILL.md`。
+- 以 YAML frontmatter 開頭。
+- `name` 必須與目錄名稱相同。
+- 提供具體且涵蓋觸發情境的單行 `description`。
+
+同一份 `src/skills/<skill-name>/SKILL.md` 會產生至兩平台；只有實際存在格式差異時才增加平台適配內容。
+
+舊版曾部署的 `%USERPROFILE%\.codex\rules\*.md` 不在新版白名單內，因此新版同步不會修改或刪除它們。新版 `AGENTS.md` 已不再路由至這些檔案；確認兩平台 Skills 在新對話中正常觸發後，再由使用者明確決定是否清理舊產物。
 
 ## 環境需求
 
@@ -260,8 +281,8 @@ PowerShell、CMD：CRLF
 
 全域規則只放跨專案共用內容。特定專案的套件管理器、架構、測試命令與部署限制應放在專案內：
 
-- Codex：專案根目錄或適用子目錄的 `AGENTS.md`
-- Antigravity：`<project>\.agents\rules\`
+- Codex：專案根目錄或適用子目錄的 `AGENTS.md`，工作流程使用專案 Skill。
+- Antigravity：固定專案規則使用 `<project>\.agents\rules\`，工作流程使用 `<project>\.agents\skills\`。
 
 ## 新增 Agent Target
 

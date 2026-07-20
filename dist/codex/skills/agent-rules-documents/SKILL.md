@@ -1,3 +1,8 @@
+---
+name: agent-rules-documents
+description: Use when creating or modifying Markdown, README files, specifications, guides, comments intended as documentation, or other written documentation artifacts.
+---
+
 <!--
 此檔案由同步系統自動產生。
 請勿直接修改，來源位於 AI Agent 規範專案。

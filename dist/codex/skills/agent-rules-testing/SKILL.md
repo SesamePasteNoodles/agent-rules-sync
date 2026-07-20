@@ -1,3 +1,8 @@
+---
+name: agent-rules-testing
+description: Use when creating, modifying, running, debugging, or reviewing tests, builds, type checks, linters, validation commands, or verification evidence.
+---
+
 <!--
 此檔案由同步系統自動產生。
 請勿直接修改，來源位於 AI Agent 規範專案。

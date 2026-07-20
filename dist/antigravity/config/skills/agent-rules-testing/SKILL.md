@@ -1,3 +1,13 @@
+---
+name: agent-rules-testing
+description: Use when creating, modifying, running, debugging, or reviewing tests, builds, type checks, linters, validation commands, or verification evidence.
+---
+
+<!--
+此檔案由同步系統自動產生。
+請勿直接修改，來源位於 AI Agent 規範專案。
+-->
+
 # 測試與驗證規則
 
 - 優先執行受影響範圍的測試、型別檢查、Lint 或建置，不因低風險局部修改就盲目執行整個專案。

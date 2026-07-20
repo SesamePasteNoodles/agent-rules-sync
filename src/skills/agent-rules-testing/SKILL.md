@@ -1,0 +1,14 @@
+---
+name: agent-rules-testing
+description: Use when creating, modifying, running, debugging, or reviewing tests, builds, type checks, linters, validation commands, or verification evidence.
+---
+
+# 測試與驗證規則
+
+- 優先執行受影響範圍的測試、型別檢查、Lint 或建置，不因低風險局部修改就盲目執行整個專案。
+- 新增或修改測試時延續既有框架、結構、命名、測試資料與斷言風格。
+- 測試應驗證需求與重要邊界，不為了讓測試通過而削弱斷言、跳過失敗案例或改變無關正式行為。
+- 測試失敗時先辨識是既有問題、環境問題或本次修改造成，再決定修正範圍。
+- 若無法執行驗證，明確說明原因、未驗證範圍與建議的後續命令。
+- 不得宣稱已通過未實際執行的測試，也不得忽略與本次修改相關的失敗。
+- 若針對同一根本錯誤連續修正 3 次仍未解決，停止盲目重試，整理錯誤、可能根因與已嘗試方法，向使用者回報並請求決策。

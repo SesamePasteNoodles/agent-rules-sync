@@ -1,3 +1,8 @@
+---
+name: agent-rules-terminal
+description: Use when running terminal, shell, build, package-manager, compiler, formatter, linter, server, watcher, or other command-line operations.
+---
+
 # 命令執行規則
 
 - 執行前確認作業系統、Shell、工作目錄與專案工具鏈，使用相容的語法、路徑格式及命令。

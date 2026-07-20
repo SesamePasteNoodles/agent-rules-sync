@@ -112,28 +112,36 @@ Copy-Item `
     -Force
 
 $testConfig = @{
-    version = 1
+    version = 2
     targets = @{
         Codex = @{
             enabled = $true
-            outputMode = 'modular'
+            outputMode = 'core-with-skills'
             destination = (Join-Path $destinationRoot 'codex')
             managedFiles = @(
                 'AGENTS.md',
-                'rules/development.md',
-                'rules/documents.md',
-                'rules/git.md',
-                'rules/security.md',
-                'rules/terminal.md',
-                'rules/testing.md'
+                'skills/agent-rules-development/SKILL.md',
+                'skills/agent-rules-documents/SKILL.md',
+                'skills/agent-rules-terminal/SKILL.md',
+                'skills/agent-rules-git/SKILL.md',
+                'skills/agent-rules-security/SKILL.md',
+                'skills/agent-rules-testing/SKILL.md'
             )
         }
         Antigravity = @{
             enabled = $true
-            outputMode = 'single-file'
+            outputMode = 'core-with-skills'
             destination = (Join-Path $destinationRoot 'antigravity')
             maxCharacters = 12000
-            managedFiles = @('GEMINI.md')
+            managedFiles = @(
+                'GEMINI.md',
+                'config/skills/agent-rules-development/SKILL.md',
+                'config/skills/agent-rules-documents/SKILL.md',
+                'config/skills/agent-rules-terminal/SKILL.md',
+                'config/skills/agent-rules-git/SKILL.md',
+                'config/skills/agent-rules-security/SKILL.md',
+                'config/skills/agent-rules-testing/SKILL.md'
+            )
         }
     }
 }
@@ -167,6 +175,25 @@ Write-TestResult `
 
 $exitCode = Invoke-TestScript -ScriptName 'Build-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Write-TestResult -Name 'Build all targets' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"
+
+$codexSkillPath = Join-Path $sandboxRepository 'dist\codex\skills\agent-rules-development\SKILL.md'
+$antigravitySkillPath = Join-Path $sandboxRepository 'dist\antigravity\config\skills\agent-rules-development\SKILL.md'
+$codexSkillContent = if (Test-Path -LiteralPath $codexSkillPath) {
+    [System.IO.File]::ReadAllText($codexSkillPath, [System.Text.Encoding]::UTF8)
+}
+else {
+    ''
+}
+Write-TestResult `
+    -Name 'Build emits portable skills for both targets' `
+    -Success (
+        (Test-Path -LiteralPath $codexSkillPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $antigravitySkillPath -PathType Leaf) -and
+        ($codexSkillContent -match '\A---\nname: agent-rules-development\n') -and
+        ((Get-FileHash -LiteralPath $codexSkillPath -Algorithm SHA256).Hash -eq
+            (Get-FileHash -LiteralPath $antigravitySkillPath -Algorithm SHA256).Hash)
+    ) `
+    -Detail 'Skill output is missing, malformed, or differs between targets'
 
 $exitCode = Invoke-TestScript -ScriptName 'Check-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Write-TestResult -Name 'Check reports unsynced destinations' -Success ($exitCode -eq 1) -Detail "Exit code $exitCode"
@@ -202,6 +229,10 @@ Write-TestResult `
 $unknownFile = Join-Path (Join-Path $destinationRoot 'codex') 'auth.json'
 [System.IO.File]::WriteAllText($unknownFile, '{"preserve":true}', $utf8NoBom)
 $unknownHash = (Get-FileHash -LiteralPath $unknownFile -Algorithm SHA256).Hash
+$unknownSkill = Join-Path (Join-Path $destinationRoot 'codex') 'skills\user-owned\SKILL.md'
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $unknownSkill)) | Out-Null
+[System.IO.File]::WriteAllText($unknownSkill, 'user-owned', $utf8NoBom)
+$unknownSkillHash = (Get-FileHash -LiteralPath $unknownSkill -Algorithm SHA256).Hash
 
 $codexAgents = Join-Path (Join-Path $destinationRoot 'codex') 'AGENTS.md'
 [System.IO.File]::AppendAllText($codexAgents, "`nmanual edit", $utf8NoBom)
@@ -215,6 +246,7 @@ $exitCode = Invoke-TestScript `
     -Arguments (@('-Target', 'Codex', '-Apply') + $configArguments)
 $antigravityHashAfter = (Get-FileHash -LiteralPath $antigravityPath -Algorithm SHA256).Hash
 $unknownHashAfter = (Get-FileHash -LiteralPath $unknownFile -Algorithm SHA256).Hash
+$unknownSkillHashAfter = (Get-FileHash -LiteralPath $unknownSkill -Algorithm SHA256).Hash
 $backupFiles = @(
     Get-ChildItem -LiteralPath (Join-Path $sandboxRepository 'backups') -Recurse -File -ErrorAction SilentlyContinue
 )
@@ -228,15 +260,31 @@ Write-TestResult `
     -Detail "Backup files: $($backupFiles.Count)"
 Write-TestResult `
     -Name 'Unknown destination file is preserved' `
-    -Success ((Test-Path -LiteralPath $unknownFile -PathType Leaf) -and ($unknownHash -eq $unknownHashAfter)) `
+    -Success (
+        (Test-Path -LiteralPath $unknownFile -PathType Leaf) -and
+        ($unknownHash -eq $unknownHashAfter) -and
+        (Test-Path -LiteralPath $unknownSkill -PathType Leaf) -and
+        ($unknownSkillHash -eq $unknownSkillHashAfter)
+    ) `
     -Detail 'Unknown file changed or was removed'
 
-$missingSource = Join-Path $sandboxRepository 'src\rules\testing.md'
+$missingSource = Join-Path $sandboxRepository 'src\skills\agent-rules-testing\SKILL.md'
 $heldSource = $missingSource + '.held'
 Move-Item -LiteralPath $missingSource -Destination $heldSource
 $exitCode = Invoke-TestScript -ScriptName 'Build-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Move-Item -LiteralPath $heldSource -Destination $missingSource
 Write-TestResult -Name 'Missing source stops build' -Success ($exitCode -eq 2) -Detail "Exit code $exitCode"
+
+$invalidSkill = Join-Path $sandboxRepository 'src\skills\agent-rules-testing\SKILL.md'
+$validSkillContent = [System.IO.File]::ReadAllText($invalidSkill, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText(
+    $invalidSkill,
+    ($validSkillContent -replace 'name: agent-rules-testing', 'name: wrong-name'),
+    $utf8NoBom
+)
+$exitCode = Invoke-TestScript -ScriptName 'Build-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
+[System.IO.File]::WriteAllText($invalidSkill, $validSkillContent, $utf8NoBom)
+Write-TestResult -Name 'Invalid skill metadata stops build' -Success ($exitCode -eq 2) -Detail "Exit code $exitCode"
 
 $exitCode = Invoke-TestScript -ScriptName 'Check-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Write-TestResult -Name 'Final no-difference check' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"

@@ -1,3 +1,13 @@
+---
+name: agent-rules-development
+description: Use when creating, modifying, debugging, refactoring, reviewing, or explaining source code, application configuration, APIs, dependencies, architecture, or implementation changes.
+---
+
+<!--
+此檔案由同步系統自動產生。
+請勿直接修改，來源位於 AI Agent 規範專案。
+-->
+
 # 程式開發規則
 
 ## 實作前
