@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/SesamePasteNoodles/ai-agent-configs/actions/workflows/ci.yml/badge.svg)](https://github.com/SesamePasteNoodles/ai-agent-configs/actions/workflows/ci.yml)
 
+![AI Agent 規範管理工具主選單](docs/images/UI.png)
+
 集中維護一份 AI Agent 規範來源，透過可驗證、可重複執行的 PowerShell
 腳本，建置並安全部署至不同 Agent 的全域規則目錄。
 
