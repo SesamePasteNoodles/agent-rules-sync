@@ -138,6 +138,7 @@ AgentRules.cmd
 8. 清理過期備份
 9. 修改 Agent 目錄
 10. 重新偵測 Agent 目錄
+11. 回復備份檔案
 0. 離開
 ```
 
@@ -252,15 +253,32 @@ backups/<yyyyMMdd-HHmmss-fff>/<target>/
 
 清理器只處理 `backups/<yyyyMMdd-HHmmss-fff>/`。名稱不符合格式的目錄（例如手動建立的 legacy 封存）會略過，不會自動刪除。
 
-回復時，先預覽備份內容，再把需要的檔案複製回對應目的地。例如：
+備份是單次同步前、僅包含當次被覆寫檔案的稀疏回滾集，不是完整時間點快照；回復時只會處理該備份實際包含且目前仍受管理的檔案，不會刪除其他檔案。
+
+先列出可用備份：
 
 ```powershell
-Copy-Item `
-  -LiteralPath '.\backups\20260720-172656\codex\AGENTS.md' `
-  -Destination "$HOME\.codex\AGENTS.md"
+.\AgentRules.cmd restore
 ```
 
-回復屬於人工明確操作，腳本不會自動猜測要回復哪一版。
+互動選單會依時間由新到舊顯示 `1.`、`2.`、`3.` 等序號，直接輸入序號即可選擇；選定後工具會固定使用對應的 BackupId 進行預覽與套用。
+
+指定 BackupId 時預設只預覽，並依目前設定的 Agent 目的目錄顯示每個檔案的實際回復位置：
+
+```powershell
+.\AgentRules.cmd restore 20260720-194317-628
+.\AgentRules.cmd restore 20260720-194317-628 --target Codex
+```
+
+確認預覽結果後才明確套用：
+
+```powershell
+.\AgentRules.cmd restore 20260720-194317-628 --target Codex --apply
+```
+
+`All` 代表該 BackupId 目錄內實際存在的所有 Agent 目標；一次同步全部目標時，各 Agent 可能分別產生不同 BackupId。套用前會先完成全部檔案的安全檢查與暫存，並把目的地現有內容建立為一份新的保護備份。任一檔案失敗時會嘗試回滾整次操作並驗證 SHA-256。
+
+為避免把過時或非本工具管理的檔案寫回全域目錄，自動回復只接受 `yyyyMMdd-HHmmss-fff` 格式的標準備份，且所選目標內的每個檔案都必須仍在該目標目前的 `managedFiles` 白名單中。舊備份若在所選目標內包含已退出白名單的歷史路徑，會拒絕該次自動回復，仍可由維護者人工檢視。
 
 ## 日常維護流程
 

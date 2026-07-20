@@ -40,9 +40,11 @@ function Write-AgentRulesUsage {
     Write-Host '  AgentRules.cmd test'
     Write-Host '  AgentRules.cmd cleanup'
     Write-Host '  AgentRules.cmd cleanup --apply'
+    Write-Host '  AgentRules.cmd restore'
+    Write-Host '  AgentRules.cmd restore <BackupId> [--target Codex|Antigravity|All] [--apply]'
     Write-Host '  AgentRules.cmd help'
     Write-Host
-    Write-Host '注意：sync、codex、antigravity 與 cleanup --apply 會立即套用變更。' -ForegroundColor Yellow
+    Write-Host '注意：sync、codex、antigravity、cleanup --apply 與 restore --apply 會立即套用變更。' -ForegroundColor Yellow
 }
 
 function Invoke-AgentRulesChildScript {
@@ -68,7 +70,7 @@ function Invoke-AgentRulesChildScript {
 function Invoke-AgentRulesCommand {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('check', 'preview', 'sync', 'codex', 'antigravity', 'build', 'test', 'cleanup')]
+        [ValidateSet('check', 'preview', 'sync', 'codex', 'antigravity', 'build', 'test', 'cleanup', 'restore')]
         [string]$Name,
 
         [string[]]$Arguments = @()
@@ -101,6 +103,11 @@ function Invoke-AgentRulesCommand {
                 -RelativePath 'scripts\Cleanup-AgentRulesBackups.ps1' `
                 -Arguments $Arguments
         }
+        'restore' {
+            Invoke-AgentRulesChildScript `
+                -RelativePath 'scripts\Restore-AgentRulesBackup.ps1' `
+                -Arguments $Arguments
+        }
     }
 }
 
@@ -128,6 +135,124 @@ function Show-AgentRulesCommandResult {
     $color = if ($ExitCode -eq 0) { 'Green' } else { 'Yellow' }
     Write-Host "執行完畢，結束碼：$ExitCode" -ForegroundColor $color
     $null = Read-Host '按 Enter 返回選單'
+}
+
+function Get-AgentRulesRestoreChoices {
+    $backupRoot = Join-Path $script:RepositoryRoot 'backups'
+    if (-not (Test-Path -LiteralPath $backupRoot -PathType Container)) {
+        return @()
+    }
+
+    $choices = @()
+    foreach ($directory in @(Get-ChildItem -LiteralPath $backupRoot -Directory -Force)) {
+        if ($directory.Name -notmatch '^\d{8}-\d{6}-\d{3}$') {
+            continue
+        }
+        $parsed = [datetime]::MinValue
+        if (-not [datetime]::TryParseExact(
+            $directory.Name,
+            'yyyyMMdd-HHmmss-fff',
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::None,
+            [ref]$parsed
+        )) {
+            continue
+        }
+
+        $targets = @()
+        $fileCount = 0
+        foreach ($targetName in @('Codex', 'Antigravity')) {
+            $targetRoot = Join-Path $directory.FullName $targetName.ToLowerInvariant()
+            if (Test-Path -LiteralPath $targetRoot -PathType Container) {
+                $targets += $targetName
+                $fileCount += @(
+                    Get-ChildItem -LiteralPath $targetRoot -Recurse -File -Force -ErrorAction Stop
+                ).Count
+            }
+        }
+        if ($targets.Count -gt 0) {
+            $choices += [pscustomobject]@{
+                BackupId = $directory.Name
+                Targets = $targets
+                FileCount = $fileCount
+            }
+        }
+    }
+
+    return @($choices | Sort-Object BackupId -Descending)
+}
+
+function Invoke-AgentRulesRestoreMenu {
+    $choices = @(Get-AgentRulesRestoreChoices)
+    if ($choices.Count -eq 0) {
+        Write-AgentRulesLog -Level 'SUMMARY' -Message '沒有可回復的標準時間戳備份。'
+        $script:LastCommandExitCode = 0
+        return
+    }
+
+    Write-Host '可回復的備份（只包含當次同步前被覆寫的檔案）：'
+    for ($index = 0; $index -lt $choices.Count; $index++) {
+        $choice = $choices[$index]
+        Write-Host (
+            '  {0}. {1}  {2}  {3} 個檔案' -f
+            ($index + 1),
+            $choice.BackupId,
+            ($choice.Targets -join ', '),
+            $choice.FileCount
+        )
+    }
+    Write-AgentRulesLog -Level 'SUMMARY' -Message "共 $($choices.Count) 份備份；請輸入序號選擇。"
+
+    Write-Host
+    while ($true) {
+        $selection = Read-Host '請輸入要回復的備份序號（直接按 Enter 取消）'
+        if (($null -eq $selection) -or [string]::IsNullOrWhiteSpace($selection)) {
+            Write-Host '已取消。' -ForegroundColor DarkYellow
+            return
+        }
+
+        $selectedIndex = 0
+        if ([int]::TryParse($selection.Trim(), [ref]$selectedIndex) -and
+            ($selectedIndex -ge 1) -and
+            ($selectedIndex -le $choices.Count)) {
+            break
+        }
+        Write-Host "[ERROR] 無效的序號，請輸入 1 到 $($choices.Count)。" -ForegroundColor Red
+    }
+    $backupId = $choices[$selectedIndex - 1].BackupId
+    Write-Host "已選擇：$selectedIndex. $backupId" -ForegroundColor Cyan
+
+    $target = Read-Host '目標 Codex、Antigravity 或 All [All]'
+    if (($null -eq $target) -or [string]::IsNullOrWhiteSpace($target)) {
+        $target = 'All'
+    }
+    $normalizedTarget = switch ($target.Trim().ToLowerInvariant()) {
+        'codex' { 'Codex' }
+        'antigravity' { 'Antigravity' }
+        'all' { 'All' }
+        default { $null }
+    }
+    if ($null -eq $normalizedTarget) {
+        Write-Host '[ERROR] 目標必須是 Codex、Antigravity 或 All。' -ForegroundColor Red
+        $script:LastCommandExitCode = 2
+        return
+    }
+
+    $arguments = @($backupId, '--target', $normalizedTarget)
+    Invoke-AgentRulesCommand -Name 'restore' -Arguments $arguments
+    if ($script:LastCommandExitCode -ne 0) {
+        return
+    }
+
+    Write-Host
+    Write-Host '只會回復上方列出的備份檔案，不會刪除其他檔案。' -ForegroundColor Yellow
+    $confirmation = Read-Host '是否套用回復？[y/N]'
+    if (($null -eq $confirmation) -or ($confirmation.Trim() -ine 'y')) {
+        Write-Host '已取消。' -ForegroundColor DarkYellow
+        return
+    }
+
+    Invoke-AgentRulesCommand -Name 'restore' -Arguments ($arguments + '--apply')
 }
 
 function Read-AgentRulesDestination {
@@ -344,6 +469,7 @@ function Show-AgentRulesMenu {
         Write-Host '8. 清理過期備份'
         Write-Host '9. 修改 Agent 目錄'
         Write-Host '10. 重新偵測 Agent 目錄'
+        Write-Host '11. 回復備份檔案'
         Write-Host '0. 離開'
         Write-Host
 
@@ -392,10 +518,14 @@ function Show-AgentRulesMenu {
                 $null = Invoke-AgentRulesDirectoryDetection
                 $null = Read-Host '按 Enter 返回選單'
             }
+            '11' {
+                Invoke-AgentRulesRestoreMenu
+                Show-AgentRulesCommandResult -ExitCode $script:LastCommandExitCode
+            }
             '0' { return }
             default {
                 Write-Host
-                Write-Host '[ERROR] 無效的選項，請輸入 0 到 10。' -ForegroundColor Red
+                Write-Host '[ERROR] 無效的選項，請輸入 0 到 11。' -ForegroundColor Red
                 $null = Read-Host '按 Enter 返回選單'
             }
         }
@@ -416,7 +546,7 @@ $unexpectedArguments = @(
     $ExtraArguments |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 )
-if ($unexpectedArguments.Count -gt 0 -and $Command -ine 'cleanup') {
+if ($unexpectedArguments.Count -gt 0 -and $Command -notin @('cleanup', 'restore')) {
     Write-Host "[ERROR] 不支援額外參數：$($unexpectedArguments -join ' ')" -ForegroundColor Red
     Write-Host
     Write-AgentRulesUsage
@@ -434,7 +564,7 @@ if ($normalizedCommand -in @('help', '--help', '-h')) {
     exit 0
 }
 
-if ($normalizedCommand -notin @('check', 'preview', 'sync', 'codex', 'antigravity', 'build', 'test', 'cleanup')) {
+if ($normalizedCommand -notin @('check', 'preview', 'sync', 'codex', 'antigravity', 'build', 'test', 'cleanup', 'restore')) {
     Write-Host "[ERROR] 未知命令：$Command" -ForegroundColor Red
     Write-Host
     Write-AgentRulesUsage

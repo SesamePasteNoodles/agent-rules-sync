@@ -92,6 +92,19 @@ function Get-TreeHashes {
     return $result
 }
 
+function Get-TreeDirectories {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        return @()
+    }
+    return @(
+        Get-ChildItem -LiteralPath $Root -Recurse -Directory -Force |
+            ForEach-Object { $_.FullName.Substring($Root.Length).TrimStart('\', '/') } |
+            Sort-Object
+    )
+}
+
 if (Test-Path -LiteralPath $sandboxRoot) {
     $resolvedSandbox = [System.IO.Path]::GetFullPath($sandboxRoot)
     $resolvedTests = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\', '/') +
@@ -266,9 +279,17 @@ Write-TestResult `
         ($interactiveResult.ExitCode -eq 0) -and
         ($interactiveResult.StandardOutput -match '\[SUMMARY\]') -and
         ($menuSource -match "Write-Host '9\. 修改 Agent 目錄'") -and
-        ($menuSource -match "Write-Host '10\. 重新偵測 Agent 目錄'")
+        ($menuSource -match "Write-Host '10\. 重新偵測 Agent 目錄'") -and
+        ($menuSource -match "Write-Host '11\. 回復備份檔案'")
     ) `
     -Detail "Exit code $($interactiveResult.ExitCode); stderr: $($interactiveResult.StandardError)"
+
+& $entryPoint restore | Out-Host
+$exitCode = $LASTEXITCODE
+Write-TestResult `
+    -Name 'Restore list succeeds when no backup directory exists' `
+    -Success ($exitCode -eq 0) `
+    -Detail "Exit code $exitCode"
 
 $backupRoot = Join-Path $sandboxRepository 'backups'
 $oldBackupNames = @(
@@ -345,6 +366,213 @@ $exitCode = Invoke-TestScript `
     -Arguments (@('-Target', 'All', '-Apply') + $configArguments)
 Write-TestResult -Name 'Initial sync' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"
 
+$restoreBackupId = '20990101-010203-004'
+$restoreBackupFile = Join-Path `
+    (Join-Path (Join-Path $sandboxRepository 'backups') $restoreBackupId) `
+    'codex\AGENTS.md'
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $restoreBackupFile)) | Out-Null
+$restoreBytes = @(
+    [byte]0xEF,
+    [byte]0xBB,
+    [byte]0xBF
+) + [System.Text.Encoding]::UTF8.GetBytes("historical restore`r`nbyte preserving")
+[System.IO.File]::WriteAllBytes($restoreBackupFile, $restoreBytes)
+
+$restoreMenuResult = Invoke-InteractiveMenuCheck `
+    -EntryPoint $entryPoint `
+    -InputLines @('11', '1', 'Codex', 'n', '', '0')
+Write-TestResult `
+    -Name 'Interactive restore menu selects a backup by number' `
+    -Success (
+        ($restoreMenuResult.ExitCode -eq 0) -and
+        ($restoreMenuResult.StandardOutput -match "1\. $restoreBackupId") -and
+        ([regex]::Matches(
+            $restoreMenuResult.StandardOutput,
+            [regex]::Escape($restoreBackupId)
+        ).Count -ge 2)
+    ) `
+    -Detail "Exit code $($restoreMenuResult.ExitCode); stderr: $($restoreMenuResult.StandardError)"
+
+$codexAgents = Join-Path (Join-Path $destinationRoot 'codex') 'AGENTS.md'
+$destinationHashBeforeRestore = (Get-FileHash -LiteralPath $codexAgents -Algorithm SHA256).Hash
+$destinationTreeBeforeRestorePreview = Get-TreeHashes -Root $destinationRoot
+$backupTreeBeforeRestorePreview = Get-TreeHashes -Root (Join-Path $sandboxRepository 'backups')
+$destinationDirectoriesBeforeRestorePreview = Get-TreeDirectories -Root $destinationRoot
+$backupDirectoriesBeforeRestorePreview = Get-TreeDirectories -Root (Join-Path $sandboxRepository 'backups')
+$exitCode = Invoke-TestScript `
+    -ScriptName 'Restore-AgentRulesBackup.ps1' `
+    -Arguments (@($restoreBackupId, '-Target', 'Codex') + $configArguments)
+$destinationTreeAfterRestorePreview = Get-TreeHashes -Root $destinationRoot
+$backupTreeAfterRestorePreview = Get-TreeHashes -Root (Join-Path $sandboxRepository 'backups')
+$destinationDirectoriesAfterRestorePreview = Get-TreeDirectories -Root $destinationRoot
+$backupDirectoriesAfterRestorePreview = Get-TreeDirectories -Root (Join-Path $sandboxRepository 'backups')
+$destinationPreviewDiff = @(
+    Compare-Object $destinationTreeBeforeRestorePreview.GetEnumerator() $destinationTreeAfterRestorePreview.GetEnumerator()
+)
+$backupPreviewDiff = @(
+    Compare-Object $backupTreeBeforeRestorePreview.GetEnumerator() $backupTreeAfterRestorePreview.GetEnumerator()
+)
+$destinationDirectoryPreviewDiff = @(
+    Compare-Object $destinationDirectoriesBeforeRestorePreview $destinationDirectoriesAfterRestorePreview
+)
+$backupDirectoryPreviewDiff = @(
+    Compare-Object $backupDirectoriesBeforeRestorePreview $backupDirectoriesAfterRestorePreview
+)
+Write-TestResult `
+    -Name 'Restore preview performs no destination or backup writes' `
+    -Success (
+        ($exitCode -eq 0) -and
+        ($destinationPreviewDiff.Count -eq 0) -and
+        ($backupPreviewDiff.Count -eq 0) -and
+        ($destinationDirectoryPreviewDiff.Count -eq 0) -and
+        ($backupDirectoryPreviewDiff.Count -eq 0)
+    ) `
+    -Detail (
+        "Exit code $exitCode; destination file diff $($destinationPreviewDiff.Count); " +
+        "backup file diff $($backupPreviewDiff.Count); destination directory diff " +
+        "$($destinationDirectoryPreviewDiff.Count); backup directory diff $($backupDirectoryPreviewDiff.Count)"
+    )
+
+& $entryPoint restore | Out-Host
+$exitCode = $LASTEXITCODE
+Write-TestResult `
+    -Name 'Restore command without BackupId lists backups' `
+    -Success ($exitCode -eq 0) `
+    -Detail "Exit code $exitCode"
+
+& $entryPoint restore --apply | Out-Host
+$exitCode = $LASTEXITCODE
+Write-TestResult `
+    -Name 'Restore apply requires BackupId' `
+    -Success ($exitCode -eq 2) `
+    -Detail "Exit code $exitCode"
+
+$backupIdsBeforeRestoreApply = @(
+    Get-ChildItem -LiteralPath (Join-Path $sandboxRepository 'backups') -Directory -Force |
+        Select-Object -ExpandProperty Name
+)
+$exitCode = Invoke-TestScript `
+    -ScriptName 'Restore-AgentRulesBackup.ps1' `
+    -Arguments (@($restoreBackupId, '-Target', 'Codex', '-Apply') + $configArguments)
+$restoredHash = (Get-FileHash -LiteralPath $codexAgents -Algorithm SHA256).Hash
+$backupIdsAfterRestoreApply = @(
+    Get-ChildItem -LiteralPath (Join-Path $sandboxRepository 'backups') -Directory -Force |
+        Select-Object -ExpandProperty Name
+)
+$newProtectionBackupIds = @(
+    Compare-Object $backupIdsBeforeRestoreApply $backupIdsAfterRestoreApply |
+        Where-Object { $_.SideIndicator -eq '=>' } |
+        Select-Object -ExpandProperty InputObject
+)
+$protectionCopies = @(
+    foreach ($newProtectionBackupId in $newProtectionBackupIds) {
+        $newProtectionRoot = Join-Path (Join-Path $sandboxRepository 'backups') $newProtectionBackupId
+        Get-ChildItem -LiteralPath $newProtectionRoot -Recurse -File -Filter 'AGENTS.md' |
+            Where-Object {
+                (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash -eq
+                    $destinationHashBeforeRestore
+            }
+        }
+    )
+Write-TestResult `
+    -Name 'Restore apply preserves bytes and creates a protection backup' `
+    -Success (
+        ($exitCode -eq 0) -and
+        ($restoredHash -eq (Get-FileHash -LiteralPath $restoreBackupFile -Algorithm SHA256).Hash) -and
+        ($newProtectionBackupIds.Count -eq 1) -and
+        ($protectionCopies.Count -gt 0)
+    ) `
+    -Detail (
+        "Exit code $exitCode; new protection backups $($newProtectionBackupIds.Count); " +
+        "matching protection copies $($protectionCopies.Count)"
+    )
+
+$exitCode = Invoke-TestScript `
+    -ScriptName 'Sync-AgentRules.ps1' `
+    -Arguments (@('-Target', 'Codex', '-Apply') + $configArguments)
+Write-TestResult `
+    -Name 'Sync can replace restored historical content' `
+    -Success ($exitCode -eq 0) `
+    -Detail "Exit code $exitCode"
+
+$unmanagedBackupId = '20990101-010203-005'
+$unmanagedBackupRoot = Join-Path `
+    (Join-Path (Join-Path $sandboxRepository 'backups') $unmanagedBackupId) `
+    'codex'
+[System.IO.Directory]::CreateDirectory($unmanagedBackupRoot) | Out-Null
+[System.IO.File]::WriteAllText(
+    (Join-Path $unmanagedBackupRoot 'auth.json'),
+    '{"unmanaged":true}',
+    $utf8NoBom
+)
+$hashBeforeRejectedRestore = (Get-FileHash -LiteralPath $codexAgents -Algorithm SHA256).Hash
+$exitCode = Invoke-TestScript `
+    -ScriptName 'Restore-AgentRulesBackup.ps1' `
+    -Arguments (@($unmanagedBackupId, '-Target', 'Codex', '-Apply') + $configArguments)
+$hashAfterRejectedRestore = (Get-FileHash -LiteralPath $codexAgents -Algorithm SHA256).Hash
+Write-TestResult `
+    -Name 'Restore rejects an entire backup containing unmanaged files' `
+    -Success (
+        ($exitCode -eq 2) -and
+        ($hashBeforeRejectedRestore -eq $hashAfterRejectedRestore)
+    ) `
+    -Detail "Exit code $exitCode"
+
+$missingDestinationBackupId = '20990101-010203-006'
+$missingDestinationRelativePath = 'skills/agent-rules-testing/SKILL.md'
+$missingDestinationBackupFile = Join-Path `
+    (Join-Path (Join-Path $sandboxRepository 'backups') $missingDestinationBackupId) `
+    ('codex\' + ($missingDestinationRelativePath -replace '/', '\'))
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $missingDestinationBackupFile)) | Out-Null
+[System.IO.File]::WriteAllText($missingDestinationBackupFile, 'restored missing file', $utf8NoBom)
+$missingDestinationPath = Join-Path `
+    (Join-Path $destinationRoot 'codex') `
+    ($missingDestinationRelativePath -replace '/', '\')
+Remove-Item -LiteralPath $missingDestinationPath -Force
+$exitCode = Invoke-TestScript `
+    -ScriptName 'Restore-AgentRulesBackup.ps1' `
+    -Arguments (@($missingDestinationBackupId, '-Target', 'Codex', '-Apply') + $configArguments)
+Write-TestResult `
+    -Name 'Restore can recreate a missing managed destination file' `
+    -Success (
+        ($exitCode -eq 0) -and
+        ((Get-FileHash -LiteralPath $missingDestinationPath -Algorithm SHA256).Hash -eq
+            (Get-FileHash -LiteralPath $missingDestinationBackupFile -Algorithm SHA256).Hash)
+    ) `
+    -Detail "Exit code $exitCode"
+
+$exitCode = Invoke-TestScript `
+    -ScriptName 'Sync-AgentRules.ps1' `
+    -Arguments (@('-Target', 'Codex', '-Apply') + $configArguments)
+Write-TestResult `
+    -Name 'Sync repairs a recreated historical managed file' `
+    -Success ($exitCode -eq 0) `
+    -Detail "Exit code $exitCode"
+
+$atomicBackupId = '20990101-010203-007'
+$atomicCodexBackup = Join-Path `
+    (Join-Path (Join-Path $sandboxRepository 'backups') $atomicBackupId) `
+    'codex\AGENTS.md'
+$atomicAntigravityBackup = Join-Path `
+    (Join-Path (Join-Path $sandboxRepository 'backups') $atomicBackupId) `
+    'antigravity\unknown.txt'
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $atomicCodexBackup)) | Out-Null
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $atomicAntigravityBackup)) | Out-Null
+[System.IO.File]::WriteAllText($atomicCodexBackup, 'must not apply', $utf8NoBom)
+[System.IO.File]::WriteAllText($atomicAntigravityBackup, 'reject all', $utf8NoBom)
+$hashBeforeAtomicRejection = (Get-FileHash -LiteralPath $codexAgents -Algorithm SHA256).Hash
+$exitCode = Invoke-TestScript `
+    -ScriptName 'Restore-AgentRulesBackup.ps1' `
+    -Arguments (@($atomicBackupId, '-Target', 'All', '-Apply') + $configArguments)
+$hashAfterAtomicRejection = (Get-FileHash -LiteralPath $codexAgents -Algorithm SHA256).Hash
+Write-TestResult `
+    -Name 'Restore completes all-target preflight before changing destinations' `
+    -Success (
+        ($exitCode -eq 2) -and
+        ($hashBeforeAtomicRejection -eq $hashAfterAtomicRejection)
+    ) `
+    -Detail "Exit code $exitCode"
+
 $exitCode = Invoke-TestScript -ScriptName 'Check-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Write-TestResult -Name 'Check after initial sync' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"
 
@@ -369,7 +597,6 @@ $unknownSkill = Join-Path (Join-Path $destinationRoot 'codex') 'skills\user-owne
 [System.IO.File]::WriteAllText($unknownSkill, 'user-owned', $utf8NoBom)
 $unknownSkillHash = (Get-FileHash -LiteralPath $unknownSkill -Algorithm SHA256).Hash
 
-$codexAgents = Join-Path (Join-Path $destinationRoot 'codex') 'AGENTS.md'
 [System.IO.File]::AppendAllText($codexAgents, "`nmanual edit", $utf8NoBom)
 $exitCode = Invoke-TestScript -ScriptName 'Check-AgentRules.ps1' -Arguments (@('-Target', 'Codex') + $configArguments)
 Write-TestResult -Name 'Check detects manual destination edit' -Success ($exitCode -eq 1) -Detail "Exit code $exitCode"
