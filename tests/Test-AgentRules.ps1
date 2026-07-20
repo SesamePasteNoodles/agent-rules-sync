@@ -72,6 +72,10 @@ foreach ($directory in @('src', 'targets', 'scripts', 'config')) {
         -Recurse `
         -Force
 }
+Copy-Item `
+    -LiteralPath (Join-Path $repositoryRoot 'AgentRules.cmd') `
+    -Destination (Join-Path $sandboxRepository 'AgentRules.cmd') `
+    -Force
 
 $testConfig = @{
     version = 1
@@ -103,6 +107,23 @@ $json = $testConfig | ConvertTo-Json -Depth 6
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($testConfigPath, $json, $utf8NoBom)
 $configArguments = @('-ConfigPath', $testConfigPath)
+
+$entryPoint = Join-Path $sandboxRepository 'AgentRules.cmd'
+& $entryPoint help | Out-Host
+$exitCode = $LASTEXITCODE
+Write-TestResult -Name 'CMD entry point shows help' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"
+
+& $entryPoint unknown | Out-Host
+$exitCode = $LASTEXITCODE
+Write-TestResult -Name 'CMD entry point rejects unknown command' -Success ($exitCode -eq 2) -Detail "Exit code $exitCode"
+
+& $entryPoint build | Out-Host
+$exitCode = $LASTEXITCODE
+$entryPointBuildOutput = Join-Path $sandboxRepository 'dist\codex\AGENTS.md'
+Write-TestResult `
+    -Name 'CMD entry point dispatches build' `
+    -Success (($exitCode -eq 0) -and (Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)) `
+    -Detail "Exit code $exitCode; output exists: $(Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)"
 
 $exitCode = Invoke-TestScript -ScriptName 'Build-AgentRules.ps1' -Arguments (@('-Target', 'All') + $configArguments)
 Write-TestResult -Name 'Build all targets' -Success ($exitCode -eq 0) -Detail "Exit code $exitCode"

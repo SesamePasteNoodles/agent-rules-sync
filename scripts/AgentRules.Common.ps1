@@ -27,6 +27,13 @@ function Write-AgentRulesLog {
         [string]$Message
     )
 
+    if ($Level -eq 'SUMMARY') {
+        Write-Host
+        Write-Host ('[{0}] {1}' -f $Level, $Message) -ForegroundColor Black -BackgroundColor Yellow
+        Write-Host
+        return
+    }
+
     Write-Host ('[{0}] {1}' -f $Level, $Message)
 }
 

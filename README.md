@@ -30,9 +30,11 @@
 │  └─ targets.json
 ├─ scripts/
 │  ├─ AgentRules.Common.ps1
+│  ├─ AgentRules.Menu.ps1
 │  ├─ Build-AgentRules.ps1
 │  ├─ Check-AgentRules.ps1
 │  └─ Sync-AgentRules.ps1
+├─ AgentRules.cmd          # 雙擊啟動器
 ├─ dist/                  # 自動產生
 └─ backups/               # 同步時自動產生，Git 忽略
 ```
@@ -89,16 +91,17 @@ dist/**
 AgentRules.cmd
 ```
 
-會開啟互動選單：
+`AgentRules.cmd` 只負責以一致的參數啟動 PowerShell；互動介面與命令路由集中在
+`scripts/AgentRules.Menu.ps1`。雙擊後會開啟：
 
 ```text
-1. Check status
-2. Preview sync
-3. Sync all
-4. Sync Codex only
-5. Sync Antigravity only
-6. Run tests
-0. Exit
+1. 檢查狀態
+2. 預覽同步
+3. 同步全部
+4. 僅同步 Codex
+5. 僅同步 Antigravity
+6. 執行測試
+0. 離開
 ```
 
 互動選單在實際同步前會再次確認。也可在 CMD 或 PowerShell 使用簡短命令：
@@ -157,7 +160,7 @@ AgentRules.cmd
 
 輸出會將檔案標示為「將新增」、「將更新」或「無變更」。
 
-完整 log 會保留供檢查，最後以 `[SUMMARY]` 顯示本次結論、差異數量與建議的下一步。例如：
+完整 log 會保留供檢查，最後以黃底黑字的 `[SUMMARY]` 顯示本次結論、差異數量與建議的下一步，且前後各保留一行空白。例如：
 
 ```text
 [SUMMARY] 結論：預覽成功，共有 8 個檔案需要同步，本次未修改全域目錄。下一步：確認上方沒有 [ERROR] 後，選 3 同步全部。
