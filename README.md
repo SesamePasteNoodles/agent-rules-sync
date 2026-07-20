@@ -1,83 +1,211 @@
-# 🤖 AI-Agents-Config
+# AI Agent 全域規範同步系統
 
-集中管理 AI Agent 的全域規範、專案規範、Prompt、Design System 與開發工作流。
+集中維護一份 AI Agent 規範來源，透過可驗證、可重複執行的 PowerShell 腳本，建置並部署至不同 Agent 的全域規則目錄。
 
-本 Repository 作為 AI Agent 的知識庫（Knowledge Base），提供可重複使用的設定與規範，協助不同專案維持一致的開發流程與輸出品質。
+目前支援：
 
----
+- Codex
+- Antigravity
 
-# 🎯 Goals
+## 核心原則
 
-- 建立一致的 AI 開發流程
-- 減少重複撰寫 Prompt
-- 提高 AI 輸出品質與一致性
-- 建立可維護、可擴充的 Agent 知識庫
-- 讓不同專案共享通用規範
+- `src/` 是唯一人工維護來源。
+- `targets/` 只放各 Agent 專屬補充。
+- `dist/` 與 Agent 全域規則都是建置或部署產物，不直接修改。
+- 未指定 `-Apply` 時，同步腳本不得修改 Agent 全域目錄。
+- 腳本只管理設定檔白名單內的檔案，不清空目錄、不碰認證、Session、快取、外掛或其他設定。
+- 同步前備份實際將被覆蓋的檔案，同步後驗證 SHA-256。
 
----
-
-# 📁 Repository Structure
+## 目錄結構
 
 ```text
 .
-├── global/          # 全域規範
-├── projects/        # 各專案專屬規範
-├── prompts/         # 常用 Prompt
-├── design/          # Design System
-├── workflows/       # AI 工作流程
-├── templates/       # 可重複使用的模板
-└── README.md
+├─ src/
+│  ├─ core.md
+│  └─ rules/
+├─ targets/
+│  ├─ codex-header.md
+│  └─ antigravity-header.md
+├─ config/
+│  └─ targets.json
+├─ scripts/
+│  ├─ AgentRules.Common.ps1
+│  ├─ Build-AgentRules.ps1
+│  ├─ Check-AgentRules.ps1
+│  └─ Sync-AgentRules.ps1
+├─ dist/                  # 自動產生
+└─ backups/               # 同步時自動產生，Git 忽略
 ```
 
-> 實際目錄會依需求持續調整。
+## 唯一來源
 
----
+共用規則只修改：
 
-# 📦 Contents
+```text
+src/core.md
+src/rules/*.md
+```
 
-本 Repository 預計包含：
+Agent 專屬內容修改：
 
-- AI Agent 全域規範
-- Project Rules
-- Coding Standards
-- Design System
-- Prompt Library
-- Workflow Templates
-- Architecture Notes
-- Best Practices
-- Checklist
-- MCP / Skill 相關設定
-- AGENTS.md 範本
+```text
+targets/codex-header.md
+targets/antigravity-header.md
+```
 
----
+不要直接修改：
 
-# 🚀 Usage
+```text
+dist/**
+%USERPROFILE%\.codex\AGENTS.md
+%USERPROFILE%\.codex\rules\**
+%USERPROFILE%\.gemini\GEMINI.md
+```
 
-依照不同專案需求，引用或複製所需規範即可。
+部署端與來源不同時，以來源重新建置與部署，不把部署端內容反向合併回來源。
 
-例如：
+## 平台目的地
 
-- 全域開發規範
-- 專案初始化
-- UI / Design 規範
-- Prompt 模板
-- Code Review 規範
-- Commit 規範
+| Agent | 輸出方式 | 目的地 |
+|---|---|---|
+| Codex | 模組化 | `%USERPROFILE%\.codex\AGENTS.md` 與 `%USERPROFILE%\.codex\rules\*.md` |
+| Antigravity | 單一檔案 | `%USERPROFILE%\.gemini\GEMINI.md` |
 
----
+目的地與管理白名單集中在 `config/targets.json`。第一階段會驗證白名單，不允許設定額外檔案。
 
-# 📌 Principles
+## 環境需求
 
-- Keep it simple.
-- Reusable over duplicated.
-- Convention over configuration.
-- Document once, reuse everywhere.
-- Continuously improve.
+- Windows
+- PowerShell 7，或 Windows PowerShell 5.1
+- 不需要額外 PowerShell Module
 
----
+建置產物使用 .NET 明確輸出 UTF-8（無 BOM）。腳本本身使用 UTF-8 BOM，避免 Windows PowerShell 5.1 將中文訊息誤判為 ANSI；PowerShell 7 亦可正常執行。
 
-# 📄 License
+## 建置
 
-Personal use.
+建置只更新 `dist/`，不修改 Agent 全域目錄：
 
-May be opened to the public in the future after removing project-specific content.
+```powershell
+.\scripts\Build-AgentRules.ps1 -Target All
+```
+
+單一目標：
+
+```powershell
+.\scripts\Build-AgentRules.ps1 -Target Codex
+.\scripts\Build-AgentRules.ps1 -Target Antigravity
+```
+
+## 檢查
+
+檢查來源、`dist/` 與目的地，不寫入任何檔案：
+
+```powershell
+.\scripts\Check-AgentRules.ps1 -Target All
+```
+
+退出碼：
+
+| 退出碼 | 意義 |
+|---:|---|
+| 0 | 來源、`dist/` 與目的地一致 |
+| 1 | 存在差異、缺少建置產物或尚未部署 |
+| 2 | 設定或來源錯誤 |
+| 3 | 無法存取目的地 |
+
+## 預覽同步
+
+預設只建置 `dist/` 並顯示目的地預計變更，不修改 Agent 全域目錄：
+
+```powershell
+.\scripts\Sync-AgentRules.ps1 -Target All
+```
+
+輸出會將檔案標示為「將新增」、「將更新」或「無變更」。
+
+## 實際同步
+
+同步全部目標：
+
+```powershell
+.\scripts\Sync-AgentRules.ps1 -Target All -Apply
+```
+
+只同步單一 Agent：
+
+```powershell
+.\scripts\Sync-AgentRules.ps1 -Target Codex -Apply
+.\scripts\Sync-AgentRules.ps1 -Target Antigravity -Apply
+```
+
+可用參數：
+
+| 參數 | 說明 |
+|---|---|
+| `-Target Codex\|Antigravity\|All` | 選擇目標，預設 `All` |
+| `-Apply` | 實際修改目的地；未指定時只預覽 |
+| `-NoBackup` | 明確停用永久備份 |
+| `-Force` | 保留給明確覆蓋情境；不會越過白名單與來源檢查 |
+| `-ConfigPath` | 指定替代設定檔，主要供測試或可攜式部署使用 |
+
+## 備份與回復
+
+預設備份位於：
+
+```text
+backups/<yyyyMMdd-HHmmss>/<target>/
+```
+
+只備份實際即將被覆蓋的受管理檔案；新增檔案不需要備份。第一階段不會自動清理舊備份。
+
+回復時，先預覽備份內容，再把需要的檔案複製回對應目的地。例如：
+
+```powershell
+Copy-Item `
+  -LiteralPath '.\backups\20260720-172656\codex\AGENTS.md' `
+  -Destination "$HOME\.codex\AGENTS.md"
+```
+
+回復屬於人工明確操作，腳本不會自動猜測要回復哪一版。
+
+## 日常維護流程
+
+```text
+修改 src/ 或 targets/
+→ git diff
+→ Build-AgentRules.ps1 -Target All
+→ Check-AgentRules.ps1 -Target All
+→ Sync-AgentRules.ps1 -Target All
+→ Sync-AgentRules.ps1 -Target All -Apply
+→ Check-AgentRules.ps1 -Target All
+→ Commit
+```
+
+`Check` 在尚未部署時回傳 `1` 是正常結果；實際同步後應回傳 `0`。
+
+## 安全行為
+
+- 只操作 `targets.json` 內的第一階段白名單。
+- 不刪除目的地未知檔案。
+- 不清空 `.codex` 或 `.gemini`。
+- 所有內容先寫入同目錄暫存檔並驗證，再取代目的檔案。
+- 每個 Agent 個別執行；失敗時嘗試回復該 Agent 已變更的檔案。
+- 必要來源缺失、設定錯誤、備份失敗或 SHA-256 不一致時立即停止。
+
+## 專案規則
+
+全域規則只放跨專案共用內容。特定專案的套件管理器、架構、測試命令與部署限制應放在專案內：
+
+- Codex：專案根目錄或適用子目錄的 `AGENTS.md`
+- Antigravity：`<project>\.agents\rules\`
+
+## 新增 Agent Target
+
+第一階段只實作 Codex 與 Antigravity。未來新增 Agent 時：
+
+1. 在 `targets/` 新增 `<agent>-header.md`。
+2. 在 `config/targets.json` 新增目標、輸出模式、目的地與白名單。
+3. 在 `AgentRules.Common.ps1` 新增該輸出模式的確定性產生邏輯。
+4. 增加隔離目的地測試，驗證預覽、同步、備份、重複同步與未知檔案保留。
+
+不要只修改設定檔就假設新輸出模式已受支援。
