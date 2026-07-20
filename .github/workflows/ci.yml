@@ -11,32 +11,44 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test (${{ matrix.name }})
+  test-windows-powershell:
+    name: Test (Windows PowerShell 5.1)
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows PowerShell 5.1
-            shell: powershell
-          - name: PowerShell 7
-            shell: pwsh
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run isolated test suite
-        shell: ${{ matrix.shell }}
+        shell: powershell
         run: ./tests/Test-AgentRules.ps1
 
       - name: Rebuild tracked artifacts
-        shell: ${{ matrix.shell }}
+        shell: powershell
         run: ./scripts/Build-AgentRules.ps1 -Target All
 
       - name: Verify generated artifacts are committed
-        shell: ${{ matrix.shell }}
+        shell: powershell
+        run: git diff --exit-code -- dist
+
+  test-powershell:
+    name: Test (PowerShell 7)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run isolated test suite
+        shell: pwsh
+        run: ./tests/Test-AgentRules.ps1
+
+      - name: Rebuild tracked artifacts
+        shell: pwsh
+        run: ./scripts/Build-AgentRules.ps1 -Target All
+
+      - name: Verify generated artifacts are committed
+        shell: pwsh
         run: git diff --exit-code -- dist
 
   secret-scan:
