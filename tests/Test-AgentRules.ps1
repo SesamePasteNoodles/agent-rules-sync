@@ -4,6 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$script:PowerShellExecutable = (Get-Process -Id $PID -ErrorAction Stop).Path
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $sandboxRoot = Join-Path $PSScriptRoot '.sandbox'
 $sandboxRepository = Join-Path $sandboxRoot 'repository'
@@ -37,7 +38,12 @@ function Invoke-TestScript {
     )
 
     $scriptPath = Join-Path (Join-Path $sandboxRepository 'scripts') $ScriptName
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath @Arguments | Out-Host
+    & $script:PowerShellExecutable `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $scriptPath `
+        @Arguments |
+        Out-Host
     $exitCode = $LASTEXITCODE
     return $exitCode
 }
