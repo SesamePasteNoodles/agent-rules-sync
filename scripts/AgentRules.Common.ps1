@@ -372,6 +372,9 @@ function Get-ExpectedManagedFiles {
     $entryFile = if ($TargetName -eq 'Codex') { 'AGENTS.md' } else { 'GEMINI.md' }
     $skillPrefix = if ($TargetName -eq 'Codex') { 'skills' } else { 'config/skills' }
     $files = @($entryFile)
+    if ($TargetName -eq 'Antigravity') {
+        $files += 'antigravity/settings.json'
+    }
     foreach ($skillName in $script:SkillNames) {
         $files += "$skillPrefix/$skillName/SKILL.md"
     }
@@ -524,6 +527,22 @@ function Get-AgentRulesArtifacts {
         RelativePath = $entryRelativePath
         Content = $entryContent
         Hash = Get-TextSha256 -Content $entryContent
+    }
+
+    if ($TargetName -eq 'Antigravity') {
+        $settingsPath = Join-Path $targetsRoot 'antigravity-settings.json'
+        $settingsContent = (Read-Utf8Text -LiteralPath $settingsPath).Trim() + "`n"
+        try {
+            $null = $settingsContent | ConvertFrom-Json
+        }
+        catch {
+            throw "Antigravity settings JSON 無法解析：$settingsPath。$($_.Exception.Message)"
+        }
+        $artifacts += [pscustomobject]@{
+            RelativePath = 'antigravity/settings.json'
+            Content = $settingsContent
+            Hash = Get-TextSha256 -Content $settingsContent
+        }
     }
 
     $skillPrefix = if ($TargetName -eq 'Codex') { 'skills' } else { 'config/skills' }

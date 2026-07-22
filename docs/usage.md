@@ -120,6 +120,10 @@
 .\scripts\Sync-AgentRules.ps1 -Target Antigravity -Apply
 ```
 
+同步 Antigravity 時也會部署專案受管理的命令白名單到
+`%USERPROFILE%\.gemini\antigravity\settings.json`。若目的檔已存在，系統會先
+備份再取代；未列入 `config/targets.json` 的其他設定檔不會被修改。
+
 | 參數 | 說明 |
 |---|---|
 | `-Target Codex\|Antigravity\|All` | 選擇目標，預設 `All` |

@@ -166,6 +166,7 @@ $testConfig = @{
             maxCharacters = 12000
             managedFiles = @(
                 'GEMINI.md',
+                'antigravity/settings.json',
                 'config/skills/agent-rules-development/SKILL.md',
                 'config/skills/agent-rules-documents/SKILL.md',
                 'config/skills/agent-rules-terminal/SKILL.md',
@@ -262,10 +263,15 @@ Write-TestResult -Name 'CMD entry point rejects unknown command' -Success ($exit
 & $entryPoint build | Out-Host
 $exitCode = $LASTEXITCODE
 $entryPointBuildOutput = Join-Path $sandboxRepository 'dist\codex\AGENTS.md'
+$antigravitySettingsBuildOutput = Join-Path $sandboxRepository 'dist\antigravity\antigravity\settings.json'
 Write-TestResult `
     -Name 'CMD entry point dispatches build' `
-    -Success (($exitCode -eq 0) -and (Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)) `
-    -Detail "Exit code $exitCode; output exists: $(Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf)"
+    -Success (
+        ($exitCode -eq 0) -and
+        (Test-Path -LiteralPath $entryPointBuildOutput -PathType Leaf) -and
+        (Test-Path -LiteralPath $antigravitySettingsBuildOutput -PathType Leaf)
+    ) `
+    -Detail "Exit code $exitCode; Codex and Antigravity settings outputs exist"
 
 $menuSource = [System.IO.File]::ReadAllText(
     (Join-Path $sandboxRepository 'scripts\AgentRules.Menu.ps1'),

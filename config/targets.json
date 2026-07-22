@@ -22,6 +22,7 @@
       "maxCharacters": 12000,
       "managedFiles": [
         "GEMINI.md",
+        "antigravity/settings.json",
         "config/skills/agent-rules-development/SKILL.md",
         "config/skills/agent-rules-documents/SKILL.md",
         "config/skills/agent-rules-terminal/SKILL.md",

@@ -23,6 +23,7 @@ dist/**
 %USERPROFILE%\.codex\AGENTS.md
 %USERPROFILE%\.codex\skills\agent-rules-*\SKILL.md
 %USERPROFILE%\.gemini\GEMINI.md
+%USERPROFILE%\.gemini\antigravity\settings.json
 %USERPROFILE%\.gemini\config\skills\agent-rules-*\SKILL.md
 ```
 
@@ -35,9 +36,13 @@ dist/**
 | Codex | 精簡核心＋原生 Skills | `%USERPROFILE%\.codex\AGENTS.md` 與 `%USERPROFILE%\.codex\skills\<skill-name>\SKILL.md` |
 | Antigravity | 精簡核心＋原生 Skills | `%USERPROFILE%\.gemini\GEMINI.md` 與 `%USERPROFILE%\.gemini\config\skills\<skill-name>\SKILL.md` |
 
+Antigravity 另由 `targets/antigravity-settings.json` 產生並管理
+`%USERPROFILE%\.gemini\antigravity\settings.json`，用於同步經專案審查的常規命令
+白名單。此設定只套用至 Antigravity，不會寫入 Codex。
+
 預設目的地、輸出模式與管理白名單集中在 `config/targets.json`。建置會驗證
-白名單，不允許設定額外檔案；同步器只管理本專案列出的 Skill，不會修改
-`skills.json` 或其他既有 Skills。
+白名單，不允許設定額外檔案；同步器只管理本專案列出的規則、Skill 與
+Antigravity 命令白名單，不會修改 `skills.json` 或其他既有 Skills。
 
 ## 核心規則與 Skills
 

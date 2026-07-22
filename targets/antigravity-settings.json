@@ -1,0 +1,19 @@
+{
+  "agent.permissions": {
+    "commands": {
+      "allowlist": [
+        "git",
+        "npm test",
+        "npm run test",
+        "npm run lint",
+        "npm run build",
+        "npm run type-check",
+        "npx eslint",
+        "npx vue-tsc",
+        "dir",
+        "ls",
+        "pwd"
+      ]
+    }
+  }
+}
